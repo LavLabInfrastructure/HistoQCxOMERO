@@ -121,6 +121,7 @@ def main(argv=None):
     results.add_header(f"config_file:\t{os.path.realpath(args.config) if args.config is not None else 'default'}")
     results.add_header(f"command_line_args:\t{' '.join(argv)}")
 
+    ###REQURIES MODDING
     # --- receive input file list (there are 3 options) -----------------------
     args.basepath = os.path.expanduser(args.basepath)
     if len(args.input_pattern) > 1:
