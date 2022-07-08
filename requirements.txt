@@ -1,4 +1,4 @@
-openslide-python==1.1.2
+omero-py==5.11.2
 scikit-image==0.18.1
 scikit-learn==0.24.1
 numpy==1.20.1
@@ -7,3 +7,4 @@ matplotlib==3.3.4
 dill==0.3.3
 pytest
 importlib-resources
+
