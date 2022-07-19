@@ -1,19 +1,16 @@
 import logging
 import os
 import numpy as np
+import skimage
+from skimage.transform import resize
 import inspect
 import zlib, dill
 from distutils.util import strtobool
 
 #os.environ['PATH'] = 'C:\\research\\openslide\\bin' + ';' + os.environ['PATH'] #can either specify openslide bin path in PATH, or add it dynamically
-from omero.gateway import BlitzGateway
-from omero.rtypes import rint
 
-###TEMP VARIABLES
-omeroUser="mjbarrett"
-omeroPass="gzyxby01"
-omeroServer="141.106.249.100"
-omeroPort=4064
+
+from omero.rtypes import rint
 
 def printMaskHelper(type, prev_mask, curr_mask):
     if type == "relative2mask":
@@ -33,7 +30,7 @@ def printMaskHelper(type, prev_mask, curr_mask):
 # magnification if not present in open slide, and/or to confirm openslide base magnification
 def getMag(s, params):
     logging.info(f"{s['filename']} - \tgetMag")
-    meta = s["omero_image"]
+    meta = s["omero_image_meta"]
     mag = meta.getObjectiveSettings().getObjective().getNominalMagnification()
     if (mag == "NA" or strtobool(params.get("confirm_base_mag", "False"))):
         mag = guessMag(meta.getPixelSizeX())
@@ -58,32 +55,28 @@ def guessMag(res):
 
 class BaseImage(dict):
 
-    def __init__(self, id, params):
+    def __init__(self, conn, id, params):
         dict.__init__(self)
 
         self.in_memory_compression = strtobool(params.get("in_memory_compression", "False"))
 
         self["warnings"] = ['']  # this needs to be first key in case anything else wants to add to it
         self["output"] = []
-
-        # set up our connection, this will probably be moved to avoid creating and destroying connections with runs queued
-        self["omero_handle"] = BlitzGateway(omeroUser, omeroPass, host=omeroPass, port=omeroPort, secure=True)
         
         # get metadata, pixeldata, and thumbnail handles
-        self["omero_image"] = self["omero_handle"].getObject("image",id)
+        self["omero_image_meta"] = self["omero_handle"].getObject("image",id)
         self["omero_pixel_store"] = self["omero_handle"].createRawPixelsStore()
-        self["omero_thumbnail_store"] = self["omero_handle"].createThumbnailStore()
 
         # set ids
         self["omero_pixel_store"].setPixelsId(id)
         self["omero_thumbnail_store"].setPixelsId(id)
 
         # these 2 need to be first for UI to work
-        self.addToPrintList("filename", self["omero_image"].getName())
+        self.addToPrintList("filename", self["omero_image_meta"].getName())
         self.addToPrintList("comments", " ")
 
         #self["os_handle"] = openslide.OpenSlide(fname)
-        self["image_base_size"] = (self["omero_image"].getSizeX(), self["omero_image"].getSizeY())
+        self["image_base_size"] = (self["omero_image_meta"].getSizeX(), self["omero_image_meta"].getSizeY())
         self["image_work_size"] = params.get("image_work_size", "1.25x")
         self["mask_statistics"] = params.get("mask_statistics", "relative2mask")
         self["base_mag"] = getMag(self, params)
@@ -116,16 +109,46 @@ class BaseImage(dict):
         self[name] = val
         self["output"].append(name)
 
-    def getImgThumg(self, dim): 
+    def __setClosestRes(ops, dim) :
+        # for each resolution of this image
+        resolutions=ops.getResolutionDescriptions()
+        for i in range(ops.getResolutionLevels()) :
+            res=resolutions[i]
+            currDif=(res.sizeX-dim[0],res.sizeY-dim[1])
+            # if the last res was the closest without going under, use it
+            if currDif < 0 :
+                ops.setResolutionLevel(ops.getResolutionLevels()-i-1)
+                return
+    
+    def __fetchArray(oim, ops, dim) :
+        channelCount = oim.getSizeC()
+        arr = np.zeros([dim[0],dim[1],channelCount],dtype=np.uint8)
+        for c in channelCount :
+            tmp=np.frombuffer(ops.getPlane(0,c,0), dtype=np.uint8)
+            tmp.shape=dim
+            arr[...,c] = tmp     
+        return arr
+
+    
+    def _scaledImg(self, dim) :
+        oim = self["omero_image_meta"]
+        ops = self["omero_pixel_store"]
+        self.__setClosestRes(ops, dim) 
+        arr = self.__fetchArray(oim,ops,dim)
+        if dim == (len(arr),len(arr[0])) : # if the closest res was the desired res, return
+            return arr
+        else : # otherwise scale then return
+            return resize(arr, dim) 
+
+    def getImgThumb(self, dim): 
         key = "img_" + str(dim)
-        ots = self["omero_thumbnail_store"]
         ops = self["omero_pixel_store"]
         if key not in self:
             if dim.replace(".", "0", 1).isdigit(): #check to see if dim is a number
                 dim = float(dim)
                 if dim < 1 and not dim.is_integer():  # specifying a downscale factor from base
                     new_dim = np.asarray(self["image_base_size"]) * dim
-                    self[key] = np.array(ots.getThumbnail(rint(new_dim[0]),rint(new_dim[1])))#suspicious
+                    self[key] = self._scaledImg(new_dim)
                     #new_dim = np.asarray(osh.dimensions) * dim
                     #self[key] = np.array(osh.get_thumbnail(new_dim))
 
@@ -140,16 +163,16 @@ class BaseImage(dict):
                         self["warnings"].append(
                             f"Desired Image Level {dim+1} does not exist! Instead using level {resolutionCount-1}! Downstream output may not be correct")
                     ops.setResolutionLevel(dim)
-                    resolution = ops.getResolutionDescriptions()[dim]
+                    resolution = (ops.getResolutionDescriptions()[dim].sizeX,ops.getResolutionDescriptions[dim].sizeY)
                     logging.info(
-                        f"{self['filename']} - \t\tloading image from level {dim} of size {resolution.sizeX}x{resolution.sizeY}")
-                    self["key"] = np.array(ops.getPlane(0,0,0))
+                        f"{self['filename']} - \t\tloading image from level {dim} of size {resolution[0]}x{resolution[1]}")
+                    self["key"] = self.__fetchArray(self["omero_image_meta"],ops,resolution)
                     #img = osh.read_region((0, 0), dim, osh.level_dimensions[dim])
                     #self[key] = np.asarray(img)[:, :, 0:3]
                 else:  # assume its an explicit size, *WARNING* this will likely cause different images to have different
                     # perceived magnifications!
                     logging.info(f"{self['filename']} - \t\tcreating image thumb of size {str(dim)}")
-                    self[key] = np.array(ots.getThumbnail(rint(dim),rint(dim)))
+                    self[key] = self._scaledImg(dim)
             elif "X" in dim.upper():  # specifies a desired operating magnification
 
                 base_mag = self["base_mag"]
@@ -163,7 +186,7 @@ class BaseImage(dict):
                 target_mag = float(dim.upper().split("X")[0])
                 downfactor = base_mag / target_mag
                 new_dim = np.asarray(self["image_base_size"]) * downfactor
-                self[key] = np.array(ots.getThumbnail(rint(new_dim[0]),rint(new_dim[1])))#suspicious
+                self[key] = self._scaledImg(new_dim)
 
                 # down_factor = base_mag / target_mag
                 # level = osh.get_best_level_for_downsample(down_factor)

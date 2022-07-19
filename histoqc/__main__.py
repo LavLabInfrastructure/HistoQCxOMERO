@@ -6,8 +6,11 @@ import logging
 import multiprocessing
 import os
 import sys
-import time
+import tempfile
 from functools import partial
+
+from omero.gateway import BlitzGateway
+from omero.sys import Parameters
 
 from histoqc._pipeline import BatchedResultFile
 from histoqc._pipeline import MultiProcessingLogManager
@@ -31,15 +34,39 @@ def main(argv=None):
         argv = sys.argv[1:]
 
     parser = argparse.ArgumentParser(prog="histoqc", description='Run HistoQC main quality control pipeline for digital pathology images')
-    parser.add_argument('input_pattern',
-                        help="input filename pattern (try: *.svs or target_path/*.svs ),"
-                             " or tsv file containing list of files to analyze",
+    parser.add_argument('object_id',
+                        help="OMERO object id(s)"
+                             "(You can use * for all images, or Project:00/Dataset:00 to specify image groups)",
                         nargs="+")
-    parser.add_argument('-o', '--outdir',
-                        help="outputdir, default ./histoqc_output_YYMMDD-hhmmss",
-                        default=f"./histoqc_output_{time.strftime('%Y%m%d-%H%M%S')}",
+    parser.add_argument('-s', '--server', 
+                        help="Skips being prompted about which omero server to sign in on",
+                        default="",
                         type=str)
-    parser.add_argument('-p', '--basepath',
+    parser.add_argument('-p', '--port',
+                        help="Skips being prompted about which port to sign in on",
+                        default="4063",
+                        type=str)
+    parser.add_argument('--secure',
+                        help="We will try to guess ssl but if you're on an ssl port use this",
+                        default=None,
+                        type=bool)
+    parser.add_argument('-u', '--user',
+                        help="Skips being prompted on which user to log in as",
+                        default="",
+                        type=str)
+    parser.add_argument('-g', '--group',
+                        help="Avoids being prompted for a group",
+                        default="",
+                        type=str)
+    parser.add_argument('-w', '--password',
+                        help="Skips being prompted for the password of the user",
+                        default="",
+                        type=str)
+    parser.add_argument('-o', '--outdir',
+                        help="outputdir, defining this will prevent uploading back to the server",
+                        default="",
+                        type=str)
+    parser.add_argument('-P', '--basepath',
                         help="base path to add to file names,"
                              " helps when producing data using existing output file as input",
                         default="",
@@ -98,9 +125,14 @@ def main(argv=None):
             return -1
 
     # --- create output directory and move log --------------------------------
-    args.outdir = os.path.expanduser(args.outdir)
-    os.makedirs(args.outdir, exist_ok=True)
+    if args.outdir : 
+        args.outdir = os.path.expanduser(args.outdir)
+        os.makedirs(args.outdir, exist_ok=True)
+    else :
+        args.outdir = tempfile.TemporaryDirectory()
+        
     move_logging_file_handler(logging.getLogger(), args.outdir)
+
 
     if BatchedResultFile.results_in_path(args.outdir):
         if args.force:
@@ -121,32 +153,48 @@ def main(argv=None):
     results.add_header(f"config_file:\t{os.path.realpath(args.config) if args.config is not None else 'default'}")
     results.add_header(f"command_line_args:\t{' '.join(argv)}")
 
-    ###REQURIES MODDING
-    # --- receive input file list (there are 3 options) -----------------------
-    args.basepath = os.path.expanduser(args.basepath)
-    if len(args.input_pattern) > 1:
-        # more than one input_pattern is interpreted as a list of files
-        # (basepath is ignored)
-        files = list(args.input_pattern)
-
-    elif args.input_pattern[0].endswith('.tsv'):
-        # input_pattern is a tsv file containing a list of files
-        files = []
-        with open(args.input_pattern[0], 'rt') as f:
-            for line in f:
-                if line[0] == "#":
-                    continue
-                fn = line.strip().split("\t")[0]
-                files.append(os.path.join(args.basepath, fn))
-
-    else:
-        # input_pattern is a glob pattern
-        pth = os.path.join(args.basepath, args.input_pattern[0])
-        files = glob.glob(pth, recursive=True)
-
+    # --- log in to omero, prompt for info if needed -------------------------
+    while True :
+        while args.server == "" : args.server = input("Server:[ip/hostname]")
+        while args.port == "" : args.port = input("Port:[4064/4063]")
+        while args.user == "" : args.user = input("Username:[user]")
+        while args.password == "" : args.password = input("Password:[pass]")
+        if args.secure == None and args.port == "4064" : 
+            args.secure=True
+        else :
+            args.secure=False 
+        conn = BlitzGateway(args.user, args.password, host=args.server, port=args.port, secure=args.secure)
+        if conn.connect() == True : break
+    
+    # --- parse and check omero object ids (there are _ options) ------------------------
+    #### Project:1  1 2 3 4 or tsv
+    if len(args.object_id) > 1 :
+        # more than one is interpretted as a list of Image IDs
+        ids = list(args.object_id)
+    elif args.object_id[0].endswith('.tsv') :
+        # if it's a tsv it should be full of image ids
+        ids = []
+        with open(args.object_id[0], 'rt') as f :
+            for line in f :
+                if line[0] == "#": continue 
+                id = line.strip().split("\t")[0]
+                ids.append(id)
+    else :
+        # else check if it's not a number, check for an object type and fetch children
+        user_in = args.object_id[0]
+        if user_in.isdigit() : 
+            ids = list(user_in)
+        else :
+            service=conn.getContainerService()
+            splitted = user_in.strip().split(":")
+            api_return = service.getImages(splitted[0],[int(splitted[1])],Parameters())
+            ids = []
+            for val in api_return :
+                ids.append(val._id._val)
+            service.close()
     lm.logger.info("-" * 80)
-    num_files = len(files)
-    lm.logger.info(f"Number of files detected by pattern:\t{num_files}")
+    num_imgs = len(ids)
+    lm.logger.info(f"Number of files detected by pattern:\t{num_imgs}")
 
     # --- start worker processes ----------------------------------------------
 
@@ -157,7 +205,7 @@ def main(argv=None):
         'log_manager': lm,
         'lock': mpm.Lock(),
         'shared_dict': mpm.dict(),
-        'num_files': num_files,
+        'num_imgs': num_imgs,
         'force': args.force,
     }
     failed = mpm.list()
@@ -172,10 +220,10 @@ def main(argv=None):
                                           initializer=worker_setup,
                                           initargs=(config,)) as pool:
                     try:
-                        for idx, file_name in enumerate(files):
+                        for idx, id in enumerate(ids):
                             _ = pool.apply_async(
                                 func=worker,
-                                args=(idx, file_name),
+                                args=(idx, id),
                                 kwds=_shared_state,
                                 callback=partial(worker_success, result_file=results),
                                 error_callback=partial(worker_error, failed=failed),
@@ -186,9 +234,9 @@ def main(argv=None):
                         pool.join()
 
         else:
-            for idx, file_name in enumerate(files):
+            for idx, id in enumerate(ids):
                 try:
-                    _success = worker(idx, file_name, **_shared_state)
+                    _success = worker(idx, id, **_shared_state)
                 except Exception as exc:
                     worker_error(exc, failed)
                     continue
@@ -205,8 +253,8 @@ def main(argv=None):
         lm.logger.info(f"There are {len(failed)} explicitly failed images (available also in error.log),"
                        " warnings are listed in warnings column in output")
 
-        for file_name, error, tb in failed:
-            lm.logger.info(f"{file_name}\t{error}\n{tb}")
+        for id, error, tb in failed:
+            lm.logger.info(f"{id}\t{error}\n{tb}")
 
     if args.symlink is not None:
         origin = os.path.realpath(args.outdir)

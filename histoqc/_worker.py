@@ -15,16 +15,16 @@ def worker_setup(c):
     load_pipeline(config=c)
 
 
-def worker(idx, file_name, *,
-           process_queue, config, outdir, log_manager, lock, shared_dict, num_files, force):
+def worker(idx, id, *,
+           process_queue, config, outdir, log_manager, lock, shared_dict, num_imgs, force):
     """pipeline worker function"""
 
     # --- output directory preparation --------------------------------
-    fname_outdir = os.path.join(outdir, os.path.basename(file_name))
+    fname_outdir = os.path.join(outdir, os.path.basename(id))
     if os.path.isdir(fname_outdir):  # directory exists
         if not force:
             log_manager.logger.warning(
-                f"{file_name} already seems to be processed (output directory exists),"
+                f"{id} already seems to be processed (output directory exists),"
                 " skipping. To avoid this behavior use --force"
             )
             return
@@ -34,10 +34,10 @@ def worker(idx, file_name, *,
     # create output dir
     os.makedirs(fname_outdir)
 
-    log_manager.logger.info(f"-----Working on:\t{file_name}\t\t{idx+1} of {num_files}")
+    log_manager.logger.info(f"-----Working on:\t{id}\t\t{idx+1} of {num_imgs}")
 
     try:
-        s = BaseImage(file_name, fname_outdir, dict(config.items("BaseImage.BaseImage")))
+        s = BaseImage(id, fname_outdir, dict(config.items("BaseImage.BaseImage")))
 
         for process, process_params in process_queue:
             process_params["lock"] = lock
@@ -51,14 +51,14 @@ def worker(idx, file_name, *,
         err_str = f"{exc.__class__} {_oneline_doc_str} {exc}"
 
         log_manager.logger.error(
-            f"{file_name} - Error analyzing file (skipping): \t {err_str}"
+            f"{id} - Error analyzing file (skipping): \t {err_str}"
         )
         if exc.__traceback__.tb_next is not None:
             func_tb_obj = str(exc.__traceback__.tb_next.tb_frame.f_code)
         else:
             func_tb_obj = str(exc.__traceback__)
 
-        exc.__histoqc_err__ = (file_name, err_str, func_tb_obj)
+        exc.__histoqc_err__ = (id, err_str, func_tb_obj)
         raise exc
 
     else:
@@ -89,10 +89,10 @@ def worker_success(s, result_file):
 def worker_error(e, failed):
     """error callback"""
     if hasattr(e, '__histoqc_err__'):
-        file_name, err_str, tb = e.__histoqc_err__
+        id, err_str, tb = e.__histoqc_err__
     else:
         # error outside of pipeline
         # todo: it would be better to handle all of this as a decorator
         #   around the worker function
-        file_name, err_str, tb = "N/A", f"error outside of pipeline {e!r}", None
-    failed.append((file_name, err_str, tb))
+        id, err_str, tb = "N/A", f"error outside of pipeline {e!r}", None
+    failed.append((id, err_str, tb))

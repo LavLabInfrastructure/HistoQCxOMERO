@@ -77,6 +77,7 @@ def move_logging_file_handler(logger, destination):
     destination :
         destination directory for the new file handler
     """
+    # probably a bad place to put logs
     for handler in reversed(logger.handlers):
         if not isinstance(handler, logging.FileHandler):
             continue
