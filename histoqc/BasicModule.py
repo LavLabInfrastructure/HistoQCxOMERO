@@ -9,14 +9,14 @@ import matplotlib.pyplot as plt
 
 def getBasicStats(s, params):
     logging.info(f"{s['filename']} - \tgetBasicStats")
-    osh = s["os_handle"]
-    s.addToPrintList("type", osh.properties.get("openslide.vendor", "NA"))
-    s.addToPrintList("levels", osh.properties.get("openslide.level-count", "NA"))
-    s.addToPrintList("height", osh.properties.get("openslide.level[0].height", "NA"))
-    s.addToPrintList("width", osh.properties.get("openslide.level[0].width", "NA"))
-    s.addToPrintList("mpp_x", osh.properties.get("openslide.mpp-x", "NA"))
-    s.addToPrintList("mpp_y", osh.properties.get("openslide.mpp-y", "NA"))
-    s.addToPrintList("comment", osh.properties.get("openslide.comment", "NA").replace("\n", " ").replace("\r", " "))
+    #osh = s["os_handle"]
+    #s.addToPrintList("type", osh.properties.get("openslide.vendor", "NA"))
+    #s.addToPrintList("levels", osh.properties.get("openslide.level-count", "NA"))
+    #s.addToPrintList("height", osh.properties.get("openslide.level[0].height", "NA"))
+    #s.addToPrintList("width", osh.properties.get("openslide.level[0].width", "NA"))
+    #s.addToPrintList("mpp_x", osh.properties.get("openslide.mpp-x", "NA"))
+    #s.addToPrintList("mpp_y", osh.properties.get("openslide.mpp-y", "NA"))
+    #s.addToPrintList("comment", osh.properties.get("openslide.comment", "NA").replace("\n", " ").replace("\r", " "))
     return
 
 

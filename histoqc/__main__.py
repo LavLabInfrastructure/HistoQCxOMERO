@@ -223,7 +223,7 @@ def main(argv=None):
                         for idx, id in enumerate(ids):
                             _ = pool.apply_async(
                                 func=worker,
-                                args=(idx, id),
+                                args=(idx, id, conn),
                                 kwds=_shared_state,
                                 callback=partial(worker_success, result_file=results),
                                 error_callback=partial(worker_error, failed=failed),
@@ -236,7 +236,7 @@ def main(argv=None):
         else:
             for idx, id in enumerate(ids):
                 try:
-                    _success = worker(idx, id, **_shared_state)
+                    _success = worker(idx, id, conn, **_shared_state)
                 except Exception as exc:
                     worker_error(exc, failed)
                     continue

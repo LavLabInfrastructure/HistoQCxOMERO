@@ -15,16 +15,16 @@ def worker_setup(c):
     load_pipeline(config=c)
 
 
-def worker(idx, id, *,
+def worker(idx, id, conn, *,
            process_queue, config, outdir, log_manager, lock, shared_dict, num_imgs, force):
     """pipeline worker function"""
 
     # --- output directory preparation --------------------------------
-    fname_outdir = os.path.join(outdir, os.path.basename(id))
+    fname_outdir = os.path.join(outdir, str(id))
     if os.path.isdir(fname_outdir):  # directory exists
         if not force:
             log_manager.logger.warning(
-                f"{id} already seems to be processed (output directory exists),"
+                f"{id} already seems to be processed ({fname_outdir} exists),"
                 " skipping. To avoid this behavior use --force"
             )
             return
@@ -33,11 +33,11 @@ def worker(idx, id, *,
             shutil.rmtree(fname_outdir)
     # create output dir
     os.makedirs(fname_outdir)
-
-    log_manager.logger.info(f"-----Working on:\t{id}\t\t{idx+1} of {num_imgs}")
+    
+    log_manager.logger.info(f"----Working on:\t{id}\t\t{idx+1} of {num_imgs}")
 
     try:
-        s = BaseImage(id, fname_outdir, dict(config.items("BaseImage.BaseImage")))
+        s = BaseImage(conn, id, fname_outdir, dict(config.items("BaseImage.BaseImage")))
 
         for process, process_params in process_queue:
             process_params["lock"] = lock
