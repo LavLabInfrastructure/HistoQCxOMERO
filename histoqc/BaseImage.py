@@ -1,14 +1,10 @@
 import logging
-import os
 import numpy as np
-import skimage
 from skimage.transform import resize
 import inspect
 import zlib, dill
 from distutils.util import strtobool
-
-
-from omero.rtypes import rint
+from omero.gateway import BlitzGateway
 
 def printMaskHelper(type, prev_mask, curr_mask):
     if type == "relative2mask":
@@ -28,11 +24,11 @@ def printMaskHelper(type, prev_mask, curr_mask):
 # magnification if not present in open slide, and/or to confirm openslide base magnification
 def getMag(s, params):
     logging.info(f"{s['filename']} - \tgetMag")
-    meta = s["omero_image_meta"]
-    if meta.getObjectiveSettings() != None :
-        mag = meta.getObjectiveSettings().getObjective().getNominalMagnification()
+    oim = s["omero_image_meta"]
+    if oim.getObjectiveSettings() != None :
+        mag = oim.getObjectiveSettings().getObjective().getNominalMagnification()
     else :
-        mag = guessMag(meta.getPixelSizeX())
+        mag = guessMag(oim.getPixelSizeX())
         logging.warning(f"{s['filename']} - Unknown base magnification for file")
         s["warnings"].append(f"{s['filename']} - Unknown base magnification for file")
     mag = float(mag)
@@ -53,7 +49,7 @@ def guessMag(res):
 
 class BaseImage(dict):
 
-    def __init__(self, conn, id, fname_outdir, params):
+    def __init__(self, command, server, id, fname_outdir, params):
         dict.__init__(self)
 
         self.in_memory_compression = strtobool(params.get("in_memory_compression", "False"))
@@ -61,8 +57,15 @@ class BaseImage(dict):
         self["warnings"] = ['']  # this needs to be first key in case anything else wants to add to it
         self["output"] = []
         self["outdir"] = fname_outdir
+        self["orig_command"] = command
         
+        # create main handle
+        conn = BlitzGateway(server[0],server[1],host=server[2],port=server[3],secure=server[4]) 
+        conn.connect()
+        conn.c.enableKeepAlive(30)
+
         # get omero service handles
+        self["omero_conn_handle"] = conn
         self["omero_image_meta"] = conn.getObject("image",id)
         self["omero_pixel_store"] = conn.createRawPixelsStore()
 
@@ -73,7 +76,6 @@ class BaseImage(dict):
         self.addToPrintList("filename", self["omero_image_meta"].getName())
         self.addToPrintList("comments", " ")
 
-        #self["os_handle"] = openslide.OpenSlide(fname)
         self["image_base_size"] = (self["omero_image_meta"].getSizeX(), self["omero_image_meta"].getSizeY())
         self["image_work_size"] = params.get("image_work_size", "1.25x")
         self["mask_statistics"] = params.get("mask_statistics", "relative2mask")
@@ -89,6 +91,7 @@ class BaseImage(dict):
         self["img_mask_force"] = []
 
         self["completed"] = []
+            
 
     def __getitem__(self, key):
         value = super(BaseImage, self).__getitem__(key)
@@ -110,23 +113,20 @@ class BaseImage(dict):
         ops = self["omero_pixel_store"]
         # for each resolution of this image
         resolutions=ops.getResolutionDescriptions()
-        logging.info(resolutions)
         for i in range(ops.getResolutionLevels()) :
             res=resolutions[i]
             currDif=(res.sizeX-dim[0],res.sizeY-dim[1])
-            # if the last res was the closest without going under, use it
+            # if the prev res was the closest without going under, use it
             if currDif[0] < 0 or currDif[1] < 0:
-                logging.info(dim)
-                logging.info(resolutions[i-1])
-                ops.setResolutionLevel(i-1)
+                # we need to add one for i (prev res was correct) and remove one from getResLevels(1 to 0 index), so nice
+                ops.setResolutionLevel(ops.getResolutionLevels()-i)
                 return
     
     def __getRawArr(self) :
         oim = self["omero_image_meta"]
         ops = self["omero_pixel_store"]
         channelCount = oim.getSizeC()
-        dim = ops.getResolutionDescriptions()[ops.getResolutionLevel()]
-        logging.info(dim)
+        dim = ops.getResolutionDescriptions()[(ops.getResolutionLevels()-1)-ops.getResolutionLevel()]
         arr = np.zeros([dim.sizeY,dim.sizeX,channelCount], dtype=np.uint8)
         for c in range(channelCount) :
             tmp=np.frombuffer(ops.getPlane(0,c,0), dtype=np.uint8)
@@ -169,13 +169,13 @@ class BaseImage(dict):
                     resolution = (ops.getResolutionDescriptions()[dim].sizeX,ops.getResolutionDescriptions[dim].sizeY)
                     logging.info(
                         f"{self['filename']} - \t\tloading image from level {dim} of size {resolution[0]}x{resolution[1]}")
-                    self["key"] = self.__getRawArr(resolution)
+                    self[key] = self.__getRawArr(np.asarray(resolution).astype(int))
                     #img = osh.read_region((0, 0), dim, osh.level_dimensions[dim])
                     #self[key] = np.asarray(img)[:, :, 0:3]
                 else:  # assume its an explicit size, *WARNING* this will likely cause different images to have different
                     # perceived magnifications!
                     logging.info(f"{self['filename']} - \t\tcreating image thumb of size {str(dim)}")
-                    self[key] = self._getScaledImg(dim)
+                    self[key] = self._getScaledImg(np.asarray((dim,dim)).astype(int))
             elif "X" in dim.upper():  # specifies a desired operating magnification
 
                 base_mag = self["base_mag"]

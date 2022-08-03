@@ -1,5 +1,6 @@
 import logging
 import os
+from tkinter import image_types
 from histoqc.BaseImage import printMaskHelper
 from skimage.morphology import remove_small_objects, binary_opening, disk
 from skimage import io, color, img_as_ubyte
@@ -9,14 +10,22 @@ import matplotlib.pyplot as plt
 
 def getBasicStats(s, params):
     logging.info(f"{s['filename']} - \tgetBasicStats")
-    #osh = s["os_handle"]
-    #s.addToPrintList("type", osh.properties.get("openslide.vendor", "NA"))
-    #s.addToPrintList("levels", osh.properties.get("openslide.level-count", "NA"))
-    #s.addToPrintList("height", osh.properties.get("openslide.level[0].height", "NA"))
-    #s.addToPrintList("width", osh.properties.get("openslide.level[0].width", "NA"))
-    #s.addToPrintList("mpp_x", osh.properties.get("openslide.mpp-x", "NA"))
-    #s.addToPrintList("mpp_y", osh.properties.get("openslide.mpp-y", "NA"))
-    #s.addToPrintList("comment", osh.properties.get("openslide.comment", "NA").replace("\n", " ").replace("\r", " "))
+    oim=s["omero_image_meta"]
+    ops=s["omero_pixel_store"]
+    imgType=oim.getInstrument().getMicroscope().getManufacturer() if oim.getInstrument() else "NA"
+    imgLevels=ops.getResolutionLevels() if ops.getResolutionLevels() else "NA"
+    imgX=oim.getSizeX() if oim.getSizeX() else "NA"
+    imgY=oim.getSizeY() if oim.getSizeY() else "NA"
+    imgXRes=oim.getPixelSizeX() if oim.getPixelSizeX() else "NA"
+    imgYRes=oim.getPixelSizeY() if oim.getPixelSizeY() else "NA"
+    comment=oim.getDescription() if oim.getDescription() else "NA"
+    s.addToPrintList("type", imgType)
+    s.addToPrintList("levels", imgLevels)
+    s.addToPrintList("height", imgY)
+    s.addToPrintList("width", imgX)
+    s.addToPrintList("mpp_x", imgXRes)
+    s.addToPrintList("mpp_y", imgYRes)
+    s.addToPrintList("comment", comment.replace("\n", " ").replace("\r", " "))
     return
 
 

@@ -165,16 +165,18 @@ def main(argv=None):
             args.secure=False 
         conn = BlitzGateway(args.user, args.password, host=args.server, port=args.port, secure=args.secure)
         if conn.connect() == True : break
+    server=(args.user, args.password, args.server, args.port, args.secure)
     
     # --- parse and check omero object ids (there are _ options) ------------------------
     #### Project:1  1 2 3 4 or tsv
+    service=conn.getContainerService()
     if len(args.object_id) > 1 :
         # more than one is interpretted as a list of Image IDs
         ids = list(args.object_id)
     elif args.object_id[0].endswith('.tsv') :
         # if it's a tsv it should be full of image ids
         ids = []
-        with open(args.object_id[0], 'rt') as f :
+        with open(args.object_id, 'rt') as f :
             for line in f :
                 if line[0] == "#": continue 
                 id = line.strip().split("\t")[0]
@@ -185,13 +187,13 @@ def main(argv=None):
         if user_in.isdigit() : 
             ids = list(user_in)
         else :
-            service=conn.getContainerService()
             splitted = user_in.strip().split(":")
             api_return = service.getImages(splitted[0],[int(splitted[1])],Parameters())
             ids = []
             for val in api_return :
                 ids.append(val._id._val)
-            service.close()
+    service.close()
+    conn.close()
     lm.logger.info("-" * 80)
     num_imgs = len(ids)
     lm.logger.info(f"Number of files detected by pattern:\t{num_imgs}")
@@ -207,10 +209,10 @@ def main(argv=None):
         'shared_dict': mpm.dict(),
         'num_imgs': num_imgs,
         'force': args.force,
+        'command': args.object_id,
     }
     failed = mpm.list()
     setup_plotting_backend(lm.logger)
-
     try:
         if args.nprocesses > 1:
 
@@ -223,7 +225,7 @@ def main(argv=None):
                         for idx, id in enumerate(ids):
                             _ = pool.apply_async(
                                 func=worker,
-                                args=(idx, id, conn),
+                                args=(idx, id, server),
                                 kwds=_shared_state,
                                 callback=partial(worker_success, result_file=results),
                                 error_callback=partial(worker_error, failed=failed),
@@ -236,7 +238,9 @@ def main(argv=None):
         else:
             for idx, id in enumerate(ids):
                 try:
-                    _success = worker(idx, id, conn, **_shared_state)
+                    logging.info("STARTING WORKER!")
+                    _success = worker(idx, id, server, **_shared_state)
+                    logging.info("SUCCESS!")
                 except Exception as exc:
                     worker_error(exc, failed)
                     continue
@@ -247,7 +251,7 @@ def main(argv=None):
         lm.logger.info("-----REQUESTED-ABORT-----\n")
 
     else:
-        lm.logger.info("----------Done-----------\n")
+        lm.logger.info("----------Done-----------")
 
     finally:
         lm.logger.info(f"There are {len(failed)} explicitly failed images (available also in error.log),"

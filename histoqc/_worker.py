@@ -6,7 +6,7 @@ from histoqc.BaseImage import BaseImage
 from histoqc._pipeline import load_pipeline
 from histoqc._pipeline import setup_plotting_backend
 
-
+global oim, ops
 # --- worker functions --------------------------------------------------------
 
 def worker_setup(c):
@@ -15,8 +15,8 @@ def worker_setup(c):
     load_pipeline(config=c)
 
 
-def worker(idx, id, conn, *,
-           process_queue, config, outdir, log_manager, lock, shared_dict, num_imgs, force):
+def worker(idx, id, server, *,
+           process_queue, config, outdir, log_manager, lock, shared_dict, num_imgs, force, command):
     """pipeline worker function"""
 
     # --- output directory preparation --------------------------------
@@ -37,7 +37,7 @@ def worker(idx, id, conn, *,
     log_manager.logger.info(f"----Working on:\t{id}\t\t{idx+1} of {num_imgs}")
 
     try:
-        s = BaseImage(conn, id, fname_outdir, dict(config.items("BaseImage.BaseImage")))
+        s = BaseImage(command, server, id, fname_outdir, dict(config.items("BaseImage.BaseImage")))
 
         for process, process_params in process_queue:
             process_params["lock"] = lock
@@ -68,7 +68,7 @@ def worker(idx, id, conn, *,
         #   file handle. This will need fixing in BaseImage.
         #   -> best solution would be to make BaseImage a contextmanager and close
         #      and cleanup the OpenSlide handle on __exit__
-        s["os_handle"] = None  # need to get rid of handle because it can't be pickled
+        s["omero_image_meta"], s["omero_pixel_store"] = None  # need to get rid of handle because it can't be pickled
         return s
 
 

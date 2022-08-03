@@ -35,11 +35,6 @@ def removeSmallObjects(s, params):
     s.addToPrintList("small_tissue_removed_num_regions", str(nobj))
     s.addToPrintList("small_tissue_removed_mean_area", str(area_mean))
     s.addToPrintList("small_tissue_removed_max_area", str(area_max))
-
-
-
-
-
     s.addToPrintList("small_tissue_removed_percent",
                      printMaskHelper(params.get("mask_statistics", s["mask_statistics"]), prev_mask, s["img_mask_use"]))
 
