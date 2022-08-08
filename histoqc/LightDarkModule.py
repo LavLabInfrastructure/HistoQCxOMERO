@@ -5,7 +5,7 @@ from histoqc.BaseImage import printMaskHelper
 from skimage import io, color, img_as_ubyte
 from distutils.util import strtobool
 from skimage.filters import threshold_otsu, rank
-from skimage.morphology import disk
+from skimage.morphology import disk, remove_small_holes
 from sklearn.cluster import KMeans
 from skimage import exposure
 
@@ -72,8 +72,6 @@ def getIntensityThresholdPercent(s, params):
     map = np.bitwise_and(map, map_var)
 
     s["img_mask_" + name] = map > 0
-
-
 
     if strtobool(params.get("invert", "False")):
         s["img_mask_" + name] = ~s["img_mask_" + name]

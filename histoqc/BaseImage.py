@@ -29,7 +29,7 @@ def getMag(s, params):
         mag = oim.getObjectiveSettings().getObjective().getNominalMagnification()
     else :
         mag = guessMag(oim.getPixelSizeX())
-        logging.warning(f"{s['filename']} - Unknown base magnification for file")
+        #logging.warning(f"{s['filename']} - Unknown base magnification for file")
         s["warnings"].append(f"{s['filename']} - Unknown base magnification for file")
     mag = float(mag)
 

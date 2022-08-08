@@ -217,7 +217,6 @@ def main(argv=None):
         if args.nprocesses > 1:
 
             with lm.logger_thread():
-                print(args.nprocesses)
                 with multiprocessing.Pool(processes=args.nprocesses,
                                           initializer=worker_setup,
                                           initargs=(config,)) as pool:
@@ -238,9 +237,7 @@ def main(argv=None):
         else:
             for idx, id in enumerate(ids):
                 try:
-                    logging.info("STARTING WORKER!")
                     _success = worker(idx, id, server, **_shared_state)
-                    logging.info("SUCCESS!")
                 except Exception as exc:
                     worker_error(exc, failed)
                     continue
