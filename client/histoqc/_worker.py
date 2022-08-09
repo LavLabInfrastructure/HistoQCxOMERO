@@ -5,8 +5,6 @@ import shutil
 from histoqc.BaseImage import BaseImage
 from histoqc._pipeline import load_pipeline
 from histoqc._pipeline import setup_plotting_backend
-
-global oim, ops
 # --- worker functions --------------------------------------------------------
 
 def worker_setup(c):
@@ -38,7 +36,6 @@ def worker(idx, id, server, *,
 
     try:
         s = BaseImage(command, server, id, fname_outdir, dict(config.items("BaseImage.BaseImage")))
-
         for process, process_params in process_queue:
             print(process, process_params)
             process_params["lock"] = lock
@@ -47,6 +44,7 @@ def worker(idx, id, server, *,
             s["completed"].append(process.__name__)
 
     except Exception as exc:
+        log_manager.logger.info(exc)
         # reproduce histoqc error string
         _oneline_doc_str = exc.__doc__.replace('\n', '')
         err_str = f"{exc.__class__} {_oneline_doc_str} {exc}"

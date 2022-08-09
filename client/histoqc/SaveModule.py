@@ -149,9 +149,9 @@ def uploadMasksAsPolygons(s, params):
     for name in os.listdir(od):
         file=os.path.join(od, name)
         if os.path.isfile(file):
+            logging.info(s["orig_command"])
             if name.endswith('.tsv'):
                 annot=conn.createFileAnnfromLocalFile(file)
-                logging.info(s["orig_command"])
                 for arg in s["orig_command"]:
                     if arg == "Project:*" or arg == "Dataset:*":
                         splitted = arg.strip().split(":")
