@@ -1,4 +1,5 @@
 """histoqc worker functions"""
+from asyncio.log import logger
 import os
 import shutil
 
@@ -37,14 +38,12 @@ def worker(idx, id, server, *,
     try:
         s = BaseImage(command, server, id, fname_outdir, dict(config.items("BaseImage.BaseImage")))
         for process, process_params in process_queue:
-            print(process, process_params)
             process_params["lock"] = lock
             process_params["shared_dict"] = shared_dict
             process(s, process_params)
             s["completed"].append(process.__name__)
 
     except Exception as exc:
-        log_manager.logger.info(exc)
         # reproduce histoqc error string
         _oneline_doc_str = exc.__doc__.replace('\n', '')
         err_str = f"{exc.__class__} {_oneline_doc_str} {exc}"
@@ -67,7 +66,8 @@ def worker(idx, id, server, *,
         #   file handle. This will need fixing in BaseImage.
         #   -> best solution would be to make BaseImage a contextmanager and close
         #      and cleanup the OpenSlide handle on __exit__
-        s["omero_image_meta"], s["omero_pixel_store"] = None  # need to get rid of handle because it can't be pickled
+        s["omero_image_meta"] = None
+        s["omero_pixel_store"] = None  # need to get rid of handles because it can't be pickled
         return s
 
 
@@ -79,7 +79,6 @@ def worker_success(s, result_file):
     with result_file:
         if result_file.is_empty_file():
             result_file.write_headers(s)
-
         _fields = '\t'.join([str(s[field]) for field in s['output']])
         _warnings = '|'.join(s['warnings'])
         result_file.write_line("\t".join([_fields, _warnings]))
@@ -87,6 +86,7 @@ def worker_success(s, result_file):
 
 def worker_error(e, failed):
     """error callback"""
+    logger.info(failed)
     if hasattr(e, '__histoqc_err__'):
         id, err_str, tb = e.__histoqc_err__
     else:

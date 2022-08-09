@@ -6,7 +6,7 @@ from distutils.util import strtobool
 import numpy as np
 from skimage import measure, io, color, img_as_ubyte, morphology
 from omero_rois import mask_from_binary_image
-from omero.model import RoiI, PolygonI, AffineTransformI
+from omero.model import RoiI, PolygonI
 from omero.rtypes import rint, rdouble, rstring
 
 def blend2Images(img, mask):
@@ -149,7 +149,6 @@ def uploadMasksAsPolygons(s, params):
     for name in os.listdir(od):
         file=os.path.join(od, name)
         if os.path.isfile(file):
-            logging.info(s["orig_command"])
             if name.endswith('.tsv'):
                 annot=conn.createFileAnnfromLocalFile(file)
                 for arg in s["orig_command"]:

@@ -259,7 +259,6 @@ def main(argv=None):
         end=time.time()
         lm.logger.info(str(end-start))
         for id, error, tb in failed:
-            lm.logger.info(failed)
             lm.logger.info(f"{id}\t{error}\n{tb}")
 
     if args.symlink is not None:

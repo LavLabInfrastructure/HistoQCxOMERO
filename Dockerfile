@@ -27,7 +27,6 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         libopenslide0 \
         libtk8.6 \
-        time \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /opt/HistoQC
 COPY --from=builder /opt/HistoQC/ .
