@@ -167,7 +167,10 @@ def uploadMasksAsPolygons(s, params):
                     # Only add 1 Polygon per Mask Shape.
                     # First is usually the longest
                     polygon= __create_polygon(contour, z=0, t=0, comment=name)
-                    __create_roi(s, oim, [polygon]) # upload mask
+                    if polygon != None :
+                        __create_roi(s, oim, [polygon]) # upload mask
+                    else :
+                        logging.warning("unable to generate roi for " + name)
         else:
             logging.warn(file.tostring() + ": should have been a file, but was not")
     return
