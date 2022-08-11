@@ -162,10 +162,8 @@ def main(argv=None):
         while args.port == "" : args.port = input("Port:[4064/4063]")
         while args.user == "" : args.user = input("Username:[user]")
         while args.password == "" : args.password = input("Password:[pass]")
-        if args.secure == None and args.port == "4064" : 
-            args.secure=True
-        else :
-            args.secure=False 
+        if args.secure == None :
+            args.secure = True if args.port == "4064" else False 
         conn = BlitzGateway(args.user, args.password, host=args.server, port=args.port, secure=args.secure)
         if conn.connect() == True : break
     server=(args.user, args.password, args.server, args.port, args.secure)

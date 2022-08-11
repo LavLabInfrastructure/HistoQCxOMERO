@@ -61,15 +61,20 @@ def getIntensityThresholdPercent(s, params):
     lower_var = float(params.get("lower_variance", -float("inf")))
     upper_var = float(params.get("upper_variance", float("inf")))
 
-    img = s.getImgThumb(s["image_work_size"])
-    img_var = img.std(axis=2)
+    tiled = bool(params.get("tile_wise", True))
+    imgs = s.getImgIter(s["image_work_size"]) if tiled else [s.getImgThumb(s["image_work_size"])]
+    map = np.zeros(s.parseDim(s["image_work_size"]))
+    for img, pos in imgs:
+        img_var = img.std(axis=2)
 
-    map_var = np.bitwise_and(img_var > lower_var, img_var < upper_var)
+        map_var = np.bitwise_and(img_var > lower_var, img_var < upper_var)
 
-    img = color.rgb2gray(img)
-    map = np.bitwise_and(img > lower_thresh, img < upper_thresh)
+        img = color.rgb2gray(img)
+        local_map = np.bitwise_and(img > lower_thresh, img < upper_thresh)
 
-    map = np.bitwise_and(map, map_var)
+        local_map = np.bitwise_and(local_map, map_var)
+        # insert findings to map
+        map[pos[1]:(pos[1]+len(img[1])),pos[0]:(pos[0]+len(img[0]))] = local_map
 
     s["img_mask_" + name] = map > 0
 
