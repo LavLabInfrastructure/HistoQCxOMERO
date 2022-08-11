@@ -52,6 +52,8 @@ def getIntensityThresholdOtsu(s, params):
 
 
 def getIntensityThresholdPercent(s, params):
+    import time
+    start=time.time()
     name = params.get("name", "classTask")
     logging.info(f"{s['filename']} - \tLightDarkModule.getIntensityThresholdPercent:\t {name}")
 
@@ -63,8 +65,11 @@ def getIntensityThresholdPercent(s, params):
 
     tiled = bool(params.get("tile_wise", True))
     imgs = s.getImgIter(s["image_work_size"]) if tiled else [s.getImgThumb(s["image_work_size"])]
-    map = np.zeros(s.parseDim(s["image_work_size"]))
+    tileSize = s["image_tile_size"]
+    logging.info(tileSize)
+    map = np.zeros(s.parseDim(s["image_work_size"]), dtype=bool)
     for img, pos in imgs:
+        logging.info(pos)
         img_var = img.std(axis=2)
 
         map_var = np.bitwise_and(img_var > lower_var, img_var < upper_var)
@@ -74,7 +79,9 @@ def getIntensityThresholdPercent(s, params):
 
         local_map = np.bitwise_and(local_map, map_var)
         # insert findings to map
-        map[pos[1]:(pos[1]+len(img[1])),pos[0]:(pos[0]+len(img[0]))] = local_map
+        logging.info(pos[0])
+        logging.info(pos[0]+tileSize[0])
+        map[pos[1]:(pos[1]+tileSize[1]),pos[0]:(pos[0]+tileSize[0])] = local_map
 
     s["img_mask_" + name] = map > 0
 
@@ -83,6 +90,9 @@ def getIntensityThresholdPercent(s, params):
 
     prev_mask = s["img_mask_use"]
     s["img_mask_use"] = s["img_mask_use"] & s["img_mask_" + name]
+
+    end=time.time()
+    logging.info(str(end-start))
 
     io.imsave(s["outdir"] + os.sep + s["filename"] + "_" + name + ".png", img_as_ubyte(prev_mask & ~s["img_mask_" + name]))
 

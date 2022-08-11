@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import numpy as np
 from skimage.transform import resize
@@ -28,24 +29,60 @@ def getMag(s, params):
     if oim.getObjectiveSettings() != None :
         mag = oim.getObjectiveSettings().getObjective().getNominalMagnification()
     else :
-        mag = guessMag(oim.getPixelSizeX())
-        #logging.warning(f"{s['filename']} - Unknown base magnification for file")
+        res = oim.getPixelSizeX()
+        if (res <= .3 ):
+            mag = 40
+        elif (res <= .6):
+            mag = 20
+        else:
+            mag = 10
+        logging.warning(f"{s['filename']} - Unknown base magnification for file")
         s["warnings"].append(f"{s['filename']} - Unknown base magnification for file")
     mag = float(mag)
-
-    return mag
-
-# i'd rather it run poorly rather than not run at all
-def guessMag(res):
-    if (res <= .3 ):
-        mag=40
-    elif (res <= .6):
-        mag=20
-    else:
-        mag=10
     return mag
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+class BaseImageIterator:
+    def __init__(self, img, dim):
+        self._img = img
+        self._idx = [0,0]
+        self._dim = dim
+        self._tileSize = img["image_tile_size"]
+
+    def __iter__(self):
+        return self
+
+    def __aiter__(self):
+        return self
+
+    def __next__(self):
+        if self._idx[1] > self._dim[1] : # if y axis too far it's over
+            raise StopIteration
+        elif self._idx[0] > self._dim[0] : # if x axis too far reset and inc y
+            self._idx[0] = 0
+            self._idx[1] += self._tileSize[1]
+        idx = (self._idx[0], self._idx[1])
+        self._idx[0] += self._tileSize[0]
+        return asyncio.run(self._img.getFullTile(self._tileSize, idx))
+    
+    async def __anext__(self):
+        try :
+            await self.__next__
+        except StopIteration:
+            raise StopAsyncIteration
+        
 
 class BaseImage(dict):
 
@@ -70,7 +107,7 @@ class BaseImage(dict):
         self["omero_pixel_store"] = conn.createRawPixelsStore()
 
         # set ids
-        self["omero_pixel_store"].setPixelsId(int(id), False)
+        self["omero_pixel_store"].setPixelsId(self["omero_image_meta"].getPixelsId(), False)
 
         # these 2 need to be first for UI to work
         self.addToPrintList("filename", self["omero_image_meta"].getName())
@@ -78,6 +115,7 @@ class BaseImage(dict):
 
         self["image_base_size"] = (self["omero_image_meta"].getSizeX(), self["omero_image_meta"].getSizeY())
         self["image_work_size"] = params.get("image_work_size", "1.25x")
+        self["image_channel_count"] = self["omero_image_meta"].getSizeC()
         self["mask_statistics"] = params.get("mask_statistics", "relative2mask")
         self["base_mag"] = getMag(self, params)
         self.addToPrintList("base_mag", self["base_mag"])
@@ -87,7 +125,7 @@ class BaseImage(dict):
             logging.error(
                 f"mask_statistic type '{self['mask_statistics']}' is not one of the 3 supported options relative2mask, absolute, relative2image!")
             exit()
-        self["img_mask_use"] = np.ones(self.getImgThumb(self["image_work_size"]).shape[0:2], dtype=bool)
+        self["img_mask_use"] = np.ones(self.parseDim(self["image_work_size"]), dtype=bool)
         self["img_mask_force"] = []
 
         self["completed"] = []
@@ -102,14 +140,70 @@ class BaseImage(dict):
     def __setitem__(self, key, value):
         if hasattr(self,"in_memory_compression") and self.in_memory_compression and key.startswith("img"):
             value = zlib.compress(dill.dumps(value), level=5)
-
         return super(BaseImage, self).__setitem__(key,value)
 
     def addToPrintList(self, name, val):
         self[name] = val
         self["output"].append(name)
 
-    def __setClosestRes(self, dim) :
+
+    # many ways to ask for dimensions (scale factor, res level, explicit size, and desired mag)
+    def parseDim(self, dim):
+        ops = self["omero_pixel_store"]
+        if dim.replace(".", "0", 1).isdigit(): #check to see if dim is a number
+            dim = float(dim)
+            if dim < 1 and not dim.is_integer():  # specifying a downscale factor from base
+                dim = np.asarray(self["image_base_size"]) * dim
+            elif dim < 100:  # assume it is a level in the img pyramid instead of a direct request
+                lvl = int(dim)
+                resolutionCount = ops.getResolutionLevels()
+                if lvl >= resolutionCount:
+                    lvl = resolutionCount - 1
+                    logging.error(
+                        f"{self['filename']}: Desired Image Level {dim} does not exist! Instead using level {lvl}! Downstream output may not be correct")
+                    self["warnings"].append(
+                        f"Desired Image Level {dim} does not exist! Instead using level {lvl}! Downstream output may not be correct")
+                ops.setResolutionLevel(lvl)
+                desc=ops.getResolutionDescriptions()
+                dim = (desc[lvl].sizeX,desc[lvl].sizeY)
+                logging.info(
+                    f"{self['filename']} - \t\tloading image from level {lvl} of size {dim[0]}x{dim[1]}")
+            else:  # assume its an explicit size, *WARNING* this will likely cause different images to have different perceived magnifications!
+                logging.info(f"{self['filename']} - \t\tcreating image thumb of size {str(dim)}")
+                dim=(dim,dim)
+        elif "X" in dim.upper():  # specifies a desired operating magnification
+            base_mag = self["base_mag"]
+            if base_mag != "NA":  # if base magnification is not known, it is set to NA by basic module
+                base_mag = float(base_mag)
+            else:  # without knowing base mag, can't use this scaling, push error and exit
+                logging.error(
+                    f"{self['filename']}: Has unknown or uncalculated base magnification, cannot specify magnification scale: {base_mag}! Did you try getMag?")
+                return -1
+            target_mag = float(dim.upper().split("X")[0])
+            downfactor = target_mag / base_mag
+            dim = np.asarray(self["image_base_size"]) * downfactor
+        else:
+            logging.error(
+                f"{self['filename']}: Unknown image level setting: {dim}!")
+            return -1
+        dim = (int(dim[0]),int(dim[1]))
+        return dim
+
+
+    async def getFullTile(self, tileSize, pos) :
+        ops = self["omero_pixel_store"]
+        img = self["omero_image_meta"].getPrimaryPixels()
+        channelCount = self["image_channel_count"]
+        arr = np.zeros([tileSize[1], tileSize[0], channelCount], dtype=np.uint8)
+        for c in range(channelCount) :
+            tmp = img.getTile(0, c, 0, (pos[0], pos[1], tileSize[0], tileSize[1]))
+            # i still hate y being first in numpy
+            tmp.shape = (tileSize[1],tileSize[0])
+            arr[..., c] = tmp
+        return arr, pos
+
+
+    def setClosestRes(self, dim) :
         ops = self["omero_pixel_store"]
         # for each resolution of this image
         resolutions=ops.getResolutionDescriptions()
@@ -120,12 +214,22 @@ class BaseImage(dict):
             if currDif[0] < 0 or currDif[1] < 0:
                 # we need to add one for i (prev res was correct) and remove one from getResLevels(1 to 0 index), so nice
                 ops.setResolutionLevel(ops.getResolutionLevels()-i)
-                return
-    
-    def __getRawArr(self) :
+                self["image_tile_size"] = self["omero_pixel_store"].getTileSize()
+        return
+
+
+    # return async iterator
+    def getImgIter(self, dim):
+        dim = self.parseDim(dim)
+        self.setClosestRes(dim)
+        return BaseImageIterator(self, dim)
+
+
+    # gets whole image outright as opposed to an interable
+    def getFullImg(self) :
         oim = self["omero_image_meta"]
         ops = self["omero_pixel_store"]
-        channelCount = oim.getSizeC()
+        channelCount = self["image_channel_count"]
         dim = ops.getResolutionDescriptions()[(ops.getResolutionLevels()-1)-ops.getResolutionLevel()]
         arr = np.zeros([dim.sizeY,dim.sizeX,channelCount], dtype=np.uint8)
         for c in range(channelCount) :
@@ -134,63 +238,13 @@ class BaseImage(dict):
             arr[...,c] = tmp     
         return arr
 
-    
-    def _getScaledImg(self, dim) :
-        self.__setClosestRes(dim) 
-        arr = self.__getRawArr()
-        if dim[1] == len(arr) and dim[0] == len(arr[0]) : # if the closest res was the desired res, return
-            return arr
-        else : # otherwise scale then return
-            return resize(arr, (dim[1],dim[0]))
 
+    # fetches a thumbnail based on provided dimension(s)
     def getImgThumb(self, dim):
-        key = "img_" + str(dim)
-        ops = self["omero_pixel_store"]
-        if key not in self:
-            if dim.replace(".", "0", 1).isdigit(): #check to see if dim is a number
-                dim = float(dim)
-                if dim < 1 and not dim.is_integer():  # specifying a downscale factor from base
-                    new_dim = np.asarray(self["image_base_size"]) * dim
-                    self[key] = self._getScaledImg(new_dim.astype(int))
-                    #new_dim = np.asarray(osh.dimensions) * dim
-                    #self[key] = np.array(osh.get_thumbnail(new_dim))
-
-                elif dim < 100:  # assume it is a level in the openslide pyramid instead of a direct request
-                    dim = int(dim)
-                    resolutionCount = ops.getResolutionLevels()
-                    if dim >= resolutionCount:
-                        dim = resolutionCount - 1
-                        calling_class = inspect.stack()[1][3]
-                        logging.error(
-                            f"{self['filename']}: Desired Image Level {dim+1} does not exist! Instead using level {resolutionCount-1}! Downstream output may not be correct")
-                        self["warnings"].append(
-                            f"Desired Image Level {dim+1} does not exist! Instead using level {resolutionCount-1}! Downstream output may not be correct")
-                    ops.setResolutionLevel(dim)
-                    resolution = (ops.getResolutionDescriptions()[dim].sizeX,ops.getResolutionDescriptions[dim].sizeY)
-                    logging.info(
-                        f"{self['filename']} - \t\tloading image from level {dim} of size {resolution[0]}x{resolution[1]}")
-                    self[key] = self.__getRawArr(np.asarray(resolution).astype(int))
-                    #img = osh.read_region((0, 0), dim, osh.level_dimensions[dim])
-                    #self[key] = np.asarray(img)[:, :, 0:3]
-                else:  # assume its an explicit size, *WARNING* this will likely cause different images to have different
-                    # perceived magnifications!
-                    logging.info(f"{self['filename']} - \t\tcreating image thumb of size {str(dim)}")
-                    self[key] = self._getScaledImg(np.asarray((dim,dim)).astype(int))
-            elif "X" in dim.upper():  # specifies a desired operating magnification
-
-                base_mag = self["base_mag"]
-                if base_mag != "NA":  # if base magnification is not known, it is set to NA by basic module
-                    base_mag = float(base_mag)
-                else:  # without knowing base mag, can't use this scaling, push error and exit
-                    logging.error(
-                        f"{self['filename']}: Has unknown or uncalculated base magnification, cannot specify magnification scale: {base_mag}! Did you try getMag?")
-                    return -1
-                target_mag = float(dim.upper().split("X")[0])
-                downfactor = target_mag / base_mag
-                new_dim = np.asarray(self["image_base_size"]) * downfactor
-                self[key] = self._getScaledImg(new_dim.astype(int))
-            else:
-                logging.error(
-                    f"{self['filename']}: Unknown image level setting: {dim}!")
-                return -1
-        return self[key]
+        dim = self.parseDim(dim) # convert to x,y tuple
+        self.setClosestRes(dim) # set res level to closest without going under
+        arr = self.getFullImg() # fetch the image at the closest res
+        # if the closest res wasn't right, resize
+        if dim[1] != len(arr) or dim[0] != len(arr[0]) : 
+            arr = resize(arr, (dim[1],dim[0]))
+        return arr, (0,0) # tuple is starting pos (compatibility for tiled calcs)
