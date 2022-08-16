@@ -1,7 +1,8 @@
+import asyncio
 import logging
 import os
 import numpy as np
-from histoqc.BaseImage import printMaskHelper
+from histoqc.BaseImage import BaseImage, printMaskHelper
 from skimage import io, color, img_as_ubyte
 from distutils.util import strtobool
 from skimage.filters import threshold_otsu, rank
@@ -49,9 +50,11 @@ def getIntensityThresholdOtsu(s, params):
                              f"Downstream modules likely to be incorrect/fail")
 
     return
-
+    
 
 def getIntensityThresholdPercent(s, params):
+    asyncio.run(getIntensityThresholdPercentWork(s, params))
+async def getIntensityThresholdPercentWork(s, params):
     import time
     start=time.time()
     name = params.get("name", "classTask")
@@ -63,13 +66,13 @@ def getIntensityThresholdPercent(s, params):
     lower_var = float(params.get("lower_variance", -float("inf")))
     upper_var = float(params.get("upper_variance", float("inf")))
 
-    tiled = bool(params.get("tile_wise", True))
-    imgs = s.getImgIter(s["image_work_size"]) if tiled else [s.getImgThumb(s["image_work_size"])]
-    tileSize = s["image_tile_size"]
-    logging.info(tileSize)
-    map = np.zeros(s.parseDim(s["image_work_size"]), dtype=bool)
-    for img, pos in imgs:
-        logging.info(pos)
+    tiled = bool(params.get("tilewise"))
+    logging.info(tiled)
+    dim=s.parseDim(s["image_work_size"])
+
+    map = np.empty((dim[1],dim[0]), dtype=bool)
+    imgs = s.tileGenerator(dim) if tiled is True else s.desync([s.getImgThumb(s["image_work_size"])])
+    async for img, tile in imgs:
         img_var = img.std(axis=2)
 
         map_var = np.bitwise_and(img_var > lower_var, img_var < upper_var)
@@ -78,10 +81,9 @@ def getIntensityThresholdPercent(s, params):
         local_map = np.bitwise_and(img > lower_thresh, img < upper_thresh)
 
         local_map = np.bitwise_and(local_map, map_var)
+        
         # insert findings to map
-        logging.info(pos[0])
-        logging.info(pos[0]+tileSize[0])
-        map[pos[1]:(pos[1]+tileSize[1]),pos[0]:(pos[0]+tileSize[0])] = local_map
+        map[tile[1]:(tile[1]+tile[3]),tile[0]:(tile[0]+tile[2])] = local_map
 
     s["img_mask_" + name] = map > 0
 

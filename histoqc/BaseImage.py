@@ -1,11 +1,14 @@
 import asyncio
 import logging
 import numpy as np
+import os
 from skimage.transform import resize
 import inspect
 import zlib, dill
 from distutils.util import strtobool
+from skimage import io
 from omero.gateway import BlitzGateway
+from omero import InternalException
 
 def printMaskHelper(type, prev_mask, curr_mask):
     if type == "relative2mask":
@@ -42,47 +45,6 @@ def getMag(s, params):
     return mag
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-class BaseImageIterator:
-    def __init__(self, img, dim):
-        self._img = img
-        self._idx = [0,0]
-        self._dim = dim
-        self._tileSize = img["image_tile_size"]
-
-    def __iter__(self):
-        return self
-
-    def __aiter__(self):
-        return self
-
-    def __next__(self):
-        if self._idx[1] > self._dim[1] : # if y axis too far it's over
-            raise StopIteration
-        elif self._idx[0] > self._dim[0] : # if x axis too far reset and inc y
-            self._idx[0] = 0
-            self._idx[1] += self._tileSize[1]
-        idx = (self._idx[0], self._idx[1])
-        self._idx[0] += self._tileSize[0]
-        return asyncio.run(self._img.getFullTile(self._tileSize, idx))
-    
-    async def __anext__(self):
-        try :
-            await self.__next__
-        except StopIteration:
-            raise StopAsyncIteration
-        
 
 class BaseImage(dict):
 
@@ -125,11 +87,14 @@ class BaseImage(dict):
             logging.error(
                 f"mask_statistic type '{self['mask_statistics']}' is not one of the 3 supported options relative2mask, absolute, relative2image!")
             exit()
-        self["img_mask_use"] = np.ones(self.parseDim(self["image_work_size"]), dtype=bool)
+        dim=self.parseDim(self["image_work_size"])
+        self["img_mask_use"] = np.ones((dim[1],dim[0]), dtype=bool)
         self["img_mask_force"] = []
 
         self["completed"] = []
-            
+
+    async def desync(self, it):
+      for x in it: yield x      
 
     def __getitem__(self, key):
         value = super(BaseImage, self).__getitem__(key)
@@ -187,20 +152,33 @@ class BaseImage(dict):
                 f"{self['filename']}: Unknown image level setting: {dim}!")
             return -1
         dim = (int(dim[0]),int(dim[1]))
+        self.setClosestRes(dim)
         return dim
+        
 
-
-    async def getFullTile(self, tileSize, pos) :
+    # fetches each channel of a given tile (x,y,w,h)
+    def getFullTile(self, tile) :
         ops = self["omero_pixel_store"]
-        img = self["omero_image_meta"].getPrimaryPixels()
         channelCount = self["image_channel_count"]
-        arr = np.zeros([tileSize[1], tileSize[0], channelCount], dtype=np.uint8)
+        arr = np.zeros([tile[3], tile[2], channelCount], dtype=np.uint8)
         for c in range(channelCount) :
-            tmp = img.getTile(0, c, 0, (pos[0], pos[1], tileSize[0], tileSize[1]))
-            # i still hate y being first in numpy
-            tmp.shape = (tileSize[1],tileSize[0])
+            tmp = np.frombuffer(ops.getTile(0,c,0,tile[0],tile[1],tile[2],tile[3]), dtype=np.uint8)
+            tmp.shape=(tile[3],tile[2])
             arr[..., c] = tmp
-        return arr, pos
+        return arr
+
+
+    # gets whole image outright as opposed to an interable
+    def getFullImg(self) :
+        ops = self["omero_pixel_store"]
+        channelCount = self["image_channel_count"]
+        dim = ops.getResolutionDescriptions()[(ops.getResolutionLevels()-1)-ops.getResolutionLevel()]
+        arr = np.zeros([dim.sizeY,dim.sizeX,channelCount], dtype=np.uint8)
+        for c in range(channelCount) :
+            tmp=np.frombuffer(ops.getPlane(0,c,0), dtype=np.uint8)
+            tmp.shape=(dim.sizeY, dim.sizeX)
+            arr[...,c] = tmp     
+        return arr
 
 
     def setClosestRes(self, dim) :
@@ -215,28 +193,26 @@ class BaseImage(dict):
                 # we need to add one for i (prev res was correct) and remove one from getResLevels(1 to 0 index), so nice
                 ops.setResolutionLevel(ops.getResolutionLevels()-i)
                 self["image_tile_size"] = self["omero_pixel_store"].getTileSize()
-        return
+                return
 
 
-    # return async iterator
-    def getImgIter(self, dim):
-        dim = self.parseDim(dim)
+    async def tileGenerator(self, dim):
         self.setClosestRes(dim)
-        return BaseImageIterator(self, dim)
-
-
-    # gets whole image outright as opposed to an interable
-    def getFullImg(self) :
-        oim = self["omero_image_meta"]
-        ops = self["omero_pixel_store"]
-        channelCount = self["image_channel_count"]
-        dim = ops.getResolutionDescriptions()[(ops.getResolutionLevels()-1)-ops.getResolutionLevel()]
-        arr = np.zeros([dim.sizeY,dim.sizeX,channelCount], dtype=np.uint8)
-        for c in range(channelCount) :
-            tmp=np.frombuffer(ops.getPlane(0,c,0), dtype=np.uint8)
-            tmp.shape=(dim.sizeY, dim.sizeX)
-            arr[...,c] = tmp     
-        return arr
+        tileSize = self["image_tile_size"]
+        async for idxY in self.desync(range(0,dim[1],tileSize[1])):
+            tileSize = self["image_tile_size"]
+            if dim[1]-idxY < tileSize[1]:
+                tileSize=(tileSize[0],dim[1]-idxY)
+            async for idxX in self.desync(range(0,dim[0],tileSize[0])):
+                try:
+                    if dim[0]-idxX < tileSize[0]:
+                        tileSize=(dim[0]-idxX, tileSize[1])
+                    tile=(idxX, idxY, tileSize[0], tileSize[1])
+                    img = self.getFullTile(tile), tile
+                    #io.imsave(self["outdir"]+ os.sep +self["filename"]+"_"+str(idxX)+"_"+str(idxY)+".png", img[0]) 
+                except InternalException as e:
+                    logging.info(e)
+                yield img
 
 
     # fetches a thumbnail based on provided dimension(s)
@@ -247,4 +223,4 @@ class BaseImage(dict):
         # if the closest res wasn't right, resize
         if dim[1] != len(arr) or dim[0] != len(arr[0]) : 
             arr = resize(arr, (dim[1],dim[0]))
-        return arr, (0,0) # tuple is starting pos (compatibility for tiled calcs)
+        return arr, (0,0,dim[0],dim[1]) # tuple is starting pos (compatibility for tiled calcs)

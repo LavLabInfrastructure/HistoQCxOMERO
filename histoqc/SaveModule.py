@@ -40,10 +40,10 @@ def saveFinalMask(s, params):
 def saveThumbnails(s, params):
     logging.info(f"{s['filename']} - \tsaveThumbnail")
     # we create 2 thumbnails for usage in the front end, one relatively small one, and one larger one
-    img = s.getImgThumb(params.get("image_work_size", "1.25x"))
+    img = s.getImgThumb(params.get("image_work_size", "1.25x"))[0]
     io.imsave(s["outdir"] + os.sep + s["filename"] + "_thumb.png", img)
 
-    img = s.getImgThumb(params.get("small_dim", 500))
+    img = s.getImgThumb(params.get("small_dim", 500))[0]
     io.imsave(s["outdir"] + os.sep + s["filename"] + "_thumb_small.png", img)
     return
 
@@ -88,9 +88,11 @@ def uploadMasks(s, params):
                     else :
                         logging.warn("wasn't sure how to handle" + file)
             else: 
-                mask=mask_from_binary_image(io.imread(file).astype(bool), text=os.path.basename(file)) # read img, put in uint8, turn to byte array, wrap in a Mask obj
-                mask.setWidth(rdouble((oim.getSizeX()-mask.getX()._val))); mask.setHeight(rdouble((oim.getSizeY()-mask.getY()._val)))
-                __create_roi(s, oim, [mask]) # upload mask
+                logging.info(file)
+                if file == "*bright*":
+                    mask=mask_from_binary_image(io.imread(file).astype(bool), text=os.path.basename(file)) # read img, put in uint8, turn to byte array, wrap in a Mask obj
+                    mask.setWidth(rdouble((oim.getSizeX()-mask.getX()._val))); mask.setHeight(rdouble((oim.getSizeY()-mask.getY()._val)))
+                    __create_roi(s, oim, [mask]) # upload mask
         else:
             logging.warn(mask.tostring() + ": should have been a file, but was not")
     return
