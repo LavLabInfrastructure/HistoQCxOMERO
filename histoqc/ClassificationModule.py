@@ -7,24 +7,19 @@ from ast import literal_eval as make_tuple
 
 from distutils.util import strtobool
 
-from histoqc.BaseImage import printMaskHelper
+from histoqc.BaseImage import printMaskHelper, desync
 from skimage import io, img_as_ubyte
 from skimage.filters import gabor_kernel, frangi, gaussian, median, laplace
 from skimage.color import rgb2gray
 from skimage.morphology import remove_small_objects, disk, dilation
 from skimage.feature import local_binary_pattern
-
 from scipy import ndimage as ndi
-
 from sklearn.naive_bayes import GaussianNB
 from sklearn.ensemble import RandomForestClassifier
-
 import numpy as np
 
-import matplotlib.pyplot as plt
 
-
-def pixelWise(s, params):
+async def pixelWise(s, params):
     name = params.get("name", "classTask")
     logging.info(f"{s['filename']} - \tpixelWise:\t", name)
 
@@ -37,21 +32,27 @@ def pixelWise(s, params):
         return
     model_vals = np.loadtxt(fname, delimiter="\t", skiprows=1)
 
-    img = s.getImgThumb(s["image_work_size"])
+    tiled = strtobool(params.get("tilewise", "True"))
+    dim=s.parseDim(s["image_work_size"])
 
-    gnb = GaussianNB()
-    gnb.fit(model_vals[:, 1:], model_vals[:, 0])
-    cal = gnb.predict_proba(img.reshape(-1, 3))
+    map = np.empty((dim[1],dim[0]), dtype=bool)
+    imgs = s.tileGenerator(dim) if tiled is True else desync([s.getImgThumb(s["image_work_size"])])
 
-    cal = cal.reshape(img.shape[0], img.shape[1], 2)
-    mask = cal[:, :, 1] > thresh
+    async for img, tile in imgs:
+        gnb = GaussianNB()
+        gnb.fit(model_vals[:, 1:], model_vals[:, 0])
+        cal = gnb.predict_proba(img.reshape(-1, 3))
 
-    mask = s["img_mask_use"] & (mask > 0)
+        cal = cal.reshape(img.shape[0], img.shape[1], 2)
+        mask = cal[:, :, 1] > thresh
 
-    s.addToPrintList(name, str(mask.mean()))
+        mask = s["img_mask_use"] & (mask > 0)
+        map[tile[1]:(tile[1]+tile[3]),tile[0]:(tile[0]+tile[2])] = mask
 
-    io.imsave(s["outdir"] + os.sep + s["filename"] + "_" + name + ".png", img_as_ubyte(mask))
-    s["img_mask_" + name] = (mask * 255) > 0
+    s.addToPrintList(name, str(map.mean()))
+
+    io.imsave(s["outdir"] + os.sep + s["filename"] + "_" + name + ".png", img_as_ubyte(map))
+    s["img_mask_" + name] = (map * 255) > 0
     prev_mask = s["img_mask_use"]
     s["img_mask_use"] = s["img_mask_use"] & ~s["img_mask_" + name]
 
@@ -143,10 +144,10 @@ def compute_features(img, params):
     for feature in features.splitlines():
         func = getattr(sys.modules[__name__], f"compute_{feature}")
         feats.append(func(img, params))
-
+    del img
     return np.concatenate(feats, axis=2)
 
-
+# scary :(
 def byExampleWithFeatures(s, params):
     name = params.get("name", "classTask")
     logging.info(f"{s['filename']} - \tClassificationModule.byExample:\t{name}")
@@ -190,6 +191,7 @@ def byExampleWithFeatures(s, params):
 
                 model_vals.append(eximg)
                 model_labels = np.vstack((model_labels, mask))
+                del eximg, mask
 
             # do stuff here with model_vals
             model_vals = np.vstack(model_vals)
@@ -199,10 +201,13 @@ def byExampleWithFeatures(s, params):
             logging.info(f"{s['filename']} - Training model ClassificationModule.byExample:{name}....done")
 
     clf = params["shared_dict"]["model_" + name]
-    img = s.getImgThumb(s["image_work_size"])
+    img = s.getImgThumb(s["image_work_size"])[0]
+    shape=img.shape
     feats = compute_features(img, params)
+    del img 
+    logging.info("deleted img")
     cal = clf.predict_proba(feats.reshape(-1, feats.shape[2]))
-    cal = cal.reshape(img.shape[0], img.shape[1], 2)
+    cal = cal.reshape(shape[0], shape[1], 2)
 
     mask = cal[:, :, 1] > thresh
 

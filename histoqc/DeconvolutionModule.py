@@ -8,12 +8,10 @@ from skimage.color import separate_stains
 from skimage.color import hed_from_rgb, hdx_from_rgb, fgx_from_rgb, bex_from_rgb, rbd_from_rgb
 from skimage.color import gdx_from_rgb, hax_from_rgb, bro_from_rgb, bpx_from_rgb, ahx_from_rgb, \
     hpx_from_rgb  # need to load all of these in case the user selects them
-from distutils.util import strtobool
-
-import matplotlib.pyplot as plt
+from histoqc.BaseImage import strtobool, desync
 
 
-def separateStains(s, params):
+async def separateStains(s, params):
     logging.info(f"{s['filename']} - \tseparateStains")
     stain = params.get("stain", "")
     use_mask = strtobool(params.get("use_mask", "True"))
@@ -45,32 +43,39 @@ def separateStains(s, params):
 
         return
 
-    img = s.getImgThumb(s["image_work_size"])
-    dimg = separate_stains(img, stain_matrix)
+    tiled = strtobool(params.get("tilewise", "True"))
+    dim=s.parseDim(s["image_work_size"])
 
-    for c in range(0, 3):
-        dc = dimg[:, :, c]
+    map = np.empty((dim[1],dim[0],s["image_channel_count"]), dtype=bool)
+    imgs = s.tileGenerator(dim) if tiled is True else desync([s.getImgThumb(s["image_work_size"])])
 
-        clip_max_val = np.quantile(dc.flatten(), .99)
-        dc = np.clip(dc, a_min=0, a_max=clip_max_val)
+    async for img, tile in imgs:
+        dimg = separate_stains(img, stain_matrix)
+
+        for c in range(0, 3):
+            dc = dimg[:, :, c]
+
+            clip_max_val = np.quantile(dc.flatten(), .99)
+            dc = np.clip(dc, a_min=0, a_max=clip_max_val)
 
 
-        if use_mask:
-            dc_sub = dc[mask]
-            dc_min = dc_sub.min()
-            dc_max = dc_sub.max()
+            if use_mask:
+                dc_sub = dc[mask]
+                dc_min = dc_sub.min()
+                dc_max = dc_sub.max()
 
-            s.addToPrintList(f"deconv_c{c}_mean", str(dc_sub.mean()))
-            s.addToPrintList(f"deconv_c{c}_std", str(dc_sub.std()))
-        else:
-            mask = 1.0
-            dc_min = dc.min()
-            dc_max = dc.max()
+                s.addToPrintList(f"deconv_c{c}_mean", str(dc_sub.mean()))
+                s.addToPrintList(f"deconv_c{c}_std", str(dc_sub.std()))
+            else:
+                mask = 1.0
+                dc_min = dc.min()
+                dc_max = dc.max()
 
-            s.addToPrintList(f"deconv_c{c}_mean", str(dc.mean()))
-            s.addToPrintList(f"deconv_c{c}_std", str(dc.std()))
+                s.addToPrintList(f"deconv_c{c}_mean", str(dc.mean()))
+                s.addToPrintList(f"deconv_c{c}_std", str(dc.std()))
 
-        dc = (dc - dc_min) / float(dc_max - dc_min) * mask
-        io.imsave(s["outdir"] + os.sep + s["filename"] + f"_deconv_c{c}.png", img_as_ubyte(dc))
+            map[tile[1]:(tile[1]+tile[3]),tile[0]:(tile[0]+tile[2]), c] = (dc - dc_min) / float(dc_max - dc_min) * mask
+    for c in range(0,3):
+        io.imsave(s["outdir"] + os.sep + s["filename"] + f"_deconv_c{c}.png", img_as_ubyte(map[..., c]))
 
     return

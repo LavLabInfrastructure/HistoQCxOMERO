@@ -1,12 +1,11 @@
-import asyncio
 import logging
 import os
 import numpy as np
-from histoqc.BaseImage import BaseImage, printMaskHelper
+from histoqc.BaseImage import printMaskHelper, desync
 from skimage import io, color, img_as_ubyte
 from distutils.util import strtobool
 from skimage.filters import threshold_otsu, rank
-from skimage.morphology import disk, remove_small_holes
+from skimage.morphology import disk
 from sklearn.cluster import KMeans
 from skimage import exposure
 
@@ -14,22 +13,28 @@ import matplotlib.pyplot as plt
 
 
 
-def getIntensityThresholdOtsu(s, params):
+async def getIntensityThresholdOtsu(s, params):
     logging.info(f"{s['filename']} - \tLightDarkModule.getIntensityThresholdOtsu")
     name = params.get("name", "classTask")    
     local = strtobool(params.get("local", "False"))
     radius = float(params.get("radius", 15))
     selem = disk(radius)
 
-    img = s.getImgThumb(s["image_work_size"])
-    img = color.rgb2gray(img)
+    tiled = strtobool(params.get("tilewise", "True"))
+    dim=s.parseDim(s["image_work_size"])
 
-    if local:
-        thresh = rank.otsu(img, selem)
-    else:
-        thresh = threshold_otsu(img)
+    map = np.empty((dim[1],dim[0]), dtype=bool)
+    imgs = s.tileGenerator(dim) if tiled is True else desync([s.getImgThumb(s["image_work_size"])])
 
-    map = img < thresh
+    async for img, tile in imgs:
+        img = color.rgb2gray(img)
+    
+        if local:
+            thresh = rank.otsu(img, selem)
+        else:
+            thresh = threshold_otsu(img)
+
+        map[tile[1]:(tile[1]+tile[3]),tile[0]:(tile[0]+tile[2])] = img < thresh
 
     s["img_mask_" + name] = map > 0
     if strtobool(params.get("invert", "False")):
@@ -52,11 +57,7 @@ def getIntensityThresholdOtsu(s, params):
     return
     
 
-def getIntensityThresholdPercent(s, params):
-    asyncio.run(getIntensityThresholdPercentWork(s, params))
-async def getIntensityThresholdPercentWork(s, params):
-    import time
-    start=time.time()
+async def getIntensityThresholdPercent(s, params):
     name = params.get("name", "classTask")
     logging.info(f"{s['filename']} - \tLightDarkModule.getIntensityThresholdPercent:\t {name}")
 
@@ -66,12 +67,12 @@ async def getIntensityThresholdPercentWork(s, params):
     lower_var = float(params.get("lower_variance", -float("inf")))
     upper_var = float(params.get("upper_variance", float("inf")))
 
-    tiled = bool(params.get("tilewise"))
-    logging.info(tiled)
+    tiled = strtobool(params.get("tilewise", "True"))
     dim=s.parseDim(s["image_work_size"])
 
     map = np.empty((dim[1],dim[0]), dtype=bool)
-    imgs = s.tileGenerator(dim) if tiled is True else s.desync([s.getImgThumb(s["image_work_size"])])
+    imgs = s.tileGenerator(dim) if tiled is True else desync([s.getImgThumb(s["image_work_size"])])
+
     async for img, tile in imgs:
         img_var = img.std(axis=2)
 
@@ -93,9 +94,6 @@ async def getIntensityThresholdPercentWork(s, params):
     prev_mask = s["img_mask_use"]
     s["img_mask_use"] = s["img_mask_use"] & s["img_mask_" + name]
 
-    end=time.time()
-    logging.info(str(end-start))
-
     io.imsave(s["outdir"] + os.sep + s["filename"] + "_" + name + ".png", img_as_ubyte(prev_mask & ~s["img_mask_" + name]))
 
     s.addToPrintList(name,
@@ -114,7 +112,7 @@ async def getIntensityThresholdPercentWork(s, params):
 
 
 
-def removeBrightestPixels(s, params):
+async def removeBrightestPixels(s, params):
     logging.info(f"{s['filename']} - \tLightDarkModule.removeBrightestPixels")
 
     # lower_thresh = float(params.get("lower_threshold", -float("inf")))
@@ -123,14 +121,22 @@ def removeBrightestPixels(s, params):
     # lower_var = float(params.get("lower_variance", -float("inf")))
     # upper_var = float(params.get("upper_variance", float("inf")))
 
-    img = s.getImgThumb(s["image_work_size"])
-    img = color.rgb2gray(img)
+    tiled = strtobool(params.get("tilewise", "True"))
+    dim=s.parseDim(s["image_work_size"])
 
-    kmeans = KMeans(n_clusters=3,  n_init=1).fit(img.reshape([-1, 1]))
-    brightest_cluster = np.argmax(kmeans.cluster_centers_)
-    darkest_point_in_brightest_cluster = (img.reshape([-1, 1])[kmeans.labels_ == brightest_cluster]).min()
+    map = np.empty((dim[1],dim[0]), dtype=bool)
+    imgs = s.tileGenerator(dim) if tiled is True else desync([s.getImgThumb(s["image_work_size"])])
 
-    s["img_mask_bright"] = img > darkest_point_in_brightest_cluster
+    async for img, tile in imgs:
+        img = color.rgb2gray(img)
+
+        kmeans = KMeans(n_clusters=3,  n_init=1).fit(img.reshape([-1, 1]))
+        brightest_cluster = np.argmax(kmeans.cluster_centers_)
+        darkest_point_in_brightest_cluster = (img.reshape([-1, 1])[kmeans.labels_ == brightest_cluster]).min()
+
+        map[tile[1]:(tile[1]+tile[3]),tile[0]:(tile[0]+tile[2])] = img > darkest_point_in_brightest_cluster
+    
+    s["img_mask_bright"] = map
 
 
 
@@ -155,19 +161,26 @@ def removeBrightestPixels(s, params):
 
 
 
-def minimumPixelIntensityNeighborhoodFiltering(s,params):
+async def minimumPixelIntensityNeighborhoodFiltering(s,params):
     logging.info(f"{s['filename']} - \tLightDarkModule.minimumPixelNeighborhoodFiltering")
     disk_size = int(params.get("disk_size", 10000))
     threshold = int(params.get("upper_threshold", 200))
 
-    img = s.getImgThumb(s["image_work_size"])
-    img = color.rgb2gray(img)
-    img = (img * 255).astype(np.uint8)
-    selem = disk(disk_size)
+    tiled = strtobool(params.get("tilewise", "True"))
+    dim=s.parseDim(s["image_work_size"])
 
-    imgfilt = rank.minimum(img, selem)
-    s["img_mask_bright"] = imgfilt > threshold
+    map = np.empty((dim[1],dim[0]), dtype=bool)
+    imgs = s.tileGenerator(dim) if tiled is True else desync([s.getImgThumb(s["image_work_size"])])
 
+    async for img, tile in imgs:
+        img = color.rgb2gray(img)
+        img = (img * 255).astype(np.uint8)
+        selem = disk(disk_size)
+
+        imgfilt = rank.minimum(img, selem)
+        map[tile[1]:(tile[1]+tile[3]),tile[0]:(tile[0]+tile[2])] = imgfilt > threshold
+    
+    s["img_mask_bright"] = map
 
     if strtobool(params.get("invert", "True")):
         s["img_mask_bright"] = ~s["img_mask_bright"]
@@ -188,13 +201,19 @@ def minimumPixelIntensityNeighborhoodFiltering(s,params):
 
     return
 
-def saveEqualisedImage(s,params):
+async def saveEqualisedImage(s,params):
     logging.info(f"{s['filename']} - \tLightDarkModule.saveEqualisedImage")
 
-    img = s.getImgThumb(s["image_work_size"])
-    img = color.rgb2gray(img)
+    tiled = strtobool(params.get("tilewise", "True"))
+    dim=s.parseDim(s["image_work_size"])
 
-    out = exposure.equalize_hist((img*255).astype(np.uint8))
+    out = np.empty((dim[1],dim[0]), dtype=bool)
+    imgs = s.tileGenerator(dim) if tiled is True else desync([s.getImgThumb(s["image_work_size"])])
+
+    async for img, tile in imgs:
+        img = color.rgb2gray(img)
+
+        out[tile[1]:(tile[1]+tile[3]),tile[0]:(tile[0]+tile[2])] = exposure.equalize_hist((img*255).astype(np.uint8))
     io.imsave(s["outdir"] + os.sep + s["filename"] + "_equalized_thumb.png", img_as_ubyte(out))
 
     return

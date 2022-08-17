@@ -26,9 +26,6 @@ from histoqc._worker import worker_error
 from histoqc.config import read_config_template
 from histoqc.data import managed_pkg_data
 
-import time
-start=time.time()
-
 
 @managed_pkg_data
 def main(argv=None):
@@ -254,8 +251,6 @@ def main(argv=None):
     finally:
         lm.logger.info(f"There are {len(failed)} explicitly failed images (available also in error.log),"
                        " warnings are listed in warnings column in output")
-        end=time.time()
-        lm.logger.info(str(end-start))
         for id, error, tb in failed:
             lm.logger.info(f"{id}\t{error}\n{tb}")
 

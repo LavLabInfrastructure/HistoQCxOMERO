@@ -13,7 +13,7 @@ def getHistogram(s, params):
     limit_to_mask = strtobool(params.get("limit_to_mask", True))
     bins = int(params.get("bins", 20))
 
-    img = s.getImgThumb(s["image_work_size"])
+    img = s.getImgThumb(s["image_work_size"])[0]
     if limit_to_mask:
         img = img[s["img_mask_use"]]
     else:
@@ -54,7 +54,7 @@ def compareToTemplates(s, params):
             # compute each of their histograms
         global_holder["templates"] = templates
 
-    img = s.getImgThumb(s["image_work_size"])
+    img = s.getImgThumb(s["image_work_size"])[0]
 
     if (limit_to_mask):
         mask = s["img_mask_use"]

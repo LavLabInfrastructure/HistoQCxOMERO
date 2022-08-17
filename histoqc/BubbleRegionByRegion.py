@@ -32,6 +32,7 @@ import matplotlib.pyplot as plt
 global_holder = {}
 
 #WARNING: Not as robust as other modules
+#WARNING: Not modified for omero
 def roiWise(s, params):
     name = params.get("name", "classTask")
     print("\tpixelWise:\t", name, end="")
@@ -96,7 +97,7 @@ def detectSmoothness(s, params):
         kernel_size = int(params.get("kernel_size", "10"))
         min_object_size = int(params.get("min_object_size", "100"))
 
-        img = s.getImgThumb(s["image_work_size"])
+        img = s.getImgThumb(s["image_work_size"])[0]
         img = color.rgb2gray(img)
         avg = np.ones((kernel_size, kernel_size)) / (kernel_size**2)
 

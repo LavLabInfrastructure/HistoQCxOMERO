@@ -1,12 +1,8 @@
-import asyncio
 import logging
 import numpy as np
-import os
 from skimage.transform import resize
-import inspect
 import zlib, dill
 from distutils.util import strtobool
-from skimage import io
 from omero.gateway import BlitzGateway
 from omero import InternalException
 
@@ -44,6 +40,10 @@ def getMag(s, params):
     mag = float(mag)
     return mag
 
+
+# turns a sync iterable into async generator
+async def desync(it):
+  for x in it: yield x  
 
 
 class BaseImage(dict):
@@ -91,10 +91,7 @@ class BaseImage(dict):
         self["img_mask_use"] = np.ones((dim[1],dim[0]), dtype=bool)
         self["img_mask_force"] = []
 
-        self["completed"] = []
-
-    async def desync(self, it):
-      for x in it: yield x      
+        self["completed"] = []    
 
     def __getitem__(self, key):
         value = super(BaseImage, self).__getitem__(key)
@@ -181,6 +178,7 @@ class BaseImage(dict):
         return arr
 
 
+    # sets the pixel store to closest resolution level without going under the desired res
     def setClosestRes(self, dim) :
         ops = self["omero_pixel_store"]
         # for each resolution of this image
@@ -196,14 +194,15 @@ class BaseImage(dict):
                 return
 
 
+    # async tile generator 
     async def tileGenerator(self, dim):
         self.setClosestRes(dim)
         tileSize = self["image_tile_size"]
-        async for idxY in self.desync(range(0,dim[1],tileSize[1])):
+        async for idxY in desync(range(0,dim[1],tileSize[1])):
             tileSize = self["image_tile_size"]
             if dim[1]-idxY < tileSize[1]:
                 tileSize=(tileSize[0],dim[1]-idxY)
-            async for idxX in self.desync(range(0,dim[0],tileSize[0])):
+            async for idxX in desync(range(0,dim[0],tileSize[0])):
                 try:
                     if dim[0]-idxX < tileSize[0]:
                         tileSize=(dim[0]-idxX, tileSize[1])

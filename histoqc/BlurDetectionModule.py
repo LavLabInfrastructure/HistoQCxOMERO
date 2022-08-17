@@ -2,10 +2,9 @@ import logging
 import os
 
 import skimage
-from histoqc.BaseImage import printMaskHelper
+from histoqc.BaseImage import printMaskHelper, strtobool, desync
 from skimage import io, img_as_ubyte, morphology, measure
 from skimage.color import rgb2gray
-from skimage.filters import rank
 import numpy as np
 
 import matplotlib.pyplot as plt
@@ -16,27 +15,36 @@ import matplotlib.pyplot as plt
 # https://pdfs.semanticscholar.org/8c67/5bf5b542b98bf81dcf70bd869ab52ab8aae9.pdf
 
 
-def identifyBlurryRegions(s, params):
+async def identifyBlurryRegions(s, params):
     logging.info(f"{s['filename']} - \tidentifyBlurryRegions")
 
     blur_radius = int(params.get("blur_radius", 7))
     blur_threshold = float(params.get("blur_threshold", .1))
-    img = s.getImgThumb(params.get("image_work_size", "2.5x"))
-    img = rgb2gray(img)
-    img_laplace = np.abs(skimage.filters.laplace(img))
-    mask = skimage.filters.gaussian(img_laplace, sigma=blur_radius) <= blur_threshold
 
-    mask = skimage.transform.resize(mask, s.getImgThumb(s["image_work_size"]).shape, order=0)[:, :,
-           1]  # for some reason resize takes a grayscale and produces a 3chan
-    mask = s["img_mask_use"] & (mask > 0)
+    tiled = strtobool(params.get("tilewise", "True"))
+    work_size=params.get("image_work_size", "2.5x")
+    work_dim=s.parseDim(work_size)
+    save_dim=s.parseDim(s["image_work_size"])
+    scale = (round(save_dim[0]/work_dim[0], 1), round(save_dim[1]/work_dim[1], 1))
 
-    io.imsave(s["outdir"] + os.sep + s["filename"] + "_blurry.png", img_as_ubyte(mask))
-    s["img_mask_blurry"] = (mask * 255) > 0
+    map = np.empty((save_dim[1],save_dim[0]), dtype=bool)
+    imgs = s.tileGenerator(s.parseDim(work_size)) if tiled else desync([s.getImgThumb(work_size)])
+    async for img, tile in imgs:
+        img = rgb2gray(img)
+        
+        img_laplace = np.abs(skimage.filters.laplace(img))
+        mask_large = skimage.filters.gaussian(img_laplace, sigma=blur_radius) <= blur_threshold
+
+        tile = (int(tile[0]*scale[0]), int(tile[1]*scale[1]), int(tile[2]*scale[0]), int(tile[3]*scale[1]))
+        mask = skimage.transform.resize(mask_large,(tile[3],tile[2]))
+        map[tile[1]:(tile[1]+tile[3]),tile[0]:(tile[0]+tile[2])] = s["img_mask_use"][tile[1]:(tile[1]+tile[3]),tile[0]:(tile[0]+tile[2])] & (mask > 0)
+    io.imsave(s["outdir"] + os.sep + s["filename"] + "_blurry.png", img_as_ubyte(map))
+    s["img_mask_blurry"] = (map * 255) > 0
 
     prev_mask = s["img_mask_use"]
     s["img_mask_use"] = s["img_mask_use"] & ~s["img_mask_blurry"]
 
-    rps = measure.regionprops(morphology.label(mask))
+    rps = measure.regionprops(morphology.label(map))
     if rps:
         areas = np.asarray([rp.area for rp in rps])
         nobj = len(rps)
