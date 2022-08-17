@@ -1,7 +1,10 @@
 """histoqc worker functions"""
+import asyncio
 from asyncio.log import logger
+import inspect
 import os
 import shutil
+from typing import Coroutine
 
 from histoqc.BaseImage import BaseImage
 from histoqc._pipeline import load_pipeline
@@ -36,12 +39,19 @@ def worker(idx, id, server, *,
     log_manager.logger.info(f"----Working on:\t{id}\t\t{idx+1} of {num_imgs}")
 
     try:
+#        import time; start_time = time.time()
         s = BaseImage(command, server, id, fname_outdir, dict(config.items("BaseImage.BaseImage")))
         for process, process_params in process_queue:
             process_params["lock"] = lock
             process_params["shared_dict"] = shared_dict
-            process(s, process_params)
+
+            if inspect.iscoroutinefunction(process):
+                asyncio.run(process(s,process_params))
+            else:
+                process(s, process_params)
+
             s["completed"].append(process.__name__)
+#        log_manager.logger.info("--- %s seconds ---" % (time.time() - start_time))
 
     except Exception as exc:
         # reproduce histoqc error string
