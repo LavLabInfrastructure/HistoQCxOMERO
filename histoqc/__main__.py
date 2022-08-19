@@ -1,13 +1,14 @@
 import argparse
 import configparser
+from dataclasses import is_dataclass
 import datetime
-import glob
 import logging
 import multiprocessing
 import os
 import sys
 import tempfile
 from functools import partial
+from histoqc import data
 
 from omero.gateway import BlitzGateway
 from omero.sys import Parameters
@@ -25,6 +26,8 @@ from histoqc._worker import worker_success
 from histoqc._worker import worker_error
 from histoqc.config import read_config_template
 from histoqc.data import managed_pkg_data
+from omero import scripts
+from omero.rtypes import rstring, rint
 
 
 @managed_pkg_data
@@ -32,12 +35,42 @@ def main(argv=None):
     """main entry point for histoqc pipelines"""
     if argv is None:
         argv = sys.argv[1:]
+        client = None
+    if argv is None:
+        try:
+            # --- server-side client interface -----------------------------------
+            dataTypes = [rstring('Image'), rstring('Dataset'), rstring('Project')]
+
+            configs="Default" #TODO
+            client = scripts.client(
+                'HistoQC', """This script runs HistoQC modules based on provided config file, served through omero api""",
+                scripts.String("Data_Type", optional=False, grouping="1", description="Choose Datatype (Image, Dataset, Project)", values=dataTypes, default="Image"),
+                scripts.List("IDs", optional=False, grouping="2",description="List of Image IDs to process.").ofType(rint(0)),
+                scripts.String("Config", optional=False, grouping="3",description="Config file to use. Config generator script coming soon", values=configs, default="Default"),
+                version="0.1",
+                authors=["Andrew Janowczyk", "Michael Barrett"],
+                institutions=["CASE", "LaViolette Lab"],
+                contact="mjbarrett@mcw.edu",
+            )
+            dataType = client.getInput("Data_Type", unwrap=True)
+            rawIds = client.getInput("Ids", unwrap=True)
+            with client.getInput("Config", unwrap=True) as configIn:
+                logging.info(configIn)
+            for id in rawIds: ids=ids+str(id)+"," # format list as csvs string
+            argv = f"{dataType}:{ids}" # format vals into terminal command
+        except Exception:
+            logging.info("OMEROxHistoQC Client")
+
 
     parser = argparse.ArgumentParser(prog="histoqc", description='Run HistoQC main quality control pipeline for digital pathology images')
     parser.add_argument('object_id',
                         help="OMERO object id(s)"
                              "(You can use * for all images, or Project:00/Dataset:00 to specify image groups)",
                         nargs="+")
+    parser.add_argument('-C', '--client',
+                        help="OMERO client object, which is just prepared login info",
+                        default="",
+                        type=str)
     parser.add_argument('-s', '--server', 
                         help="Skips being prompted about which omero server to sign in on",
                         default="",
@@ -89,6 +122,7 @@ def main(argv=None):
                         help="create symlink to outdir in TARGET_DIR",
                         default=None)
     args = parser.parse_args(argv)
+    if client != None: args.client=client
 
     # --- multiprocessing and logging setup -----------------------------------
 

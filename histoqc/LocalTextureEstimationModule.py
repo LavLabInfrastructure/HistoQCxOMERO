@@ -3,10 +3,9 @@ import numpy as np
 from skimage import  color
 from distutils.util import strtobool
 from skimage.feature import greycomatrix, greycoprops
-import matplotlib.pyplot as plt
 
 
-
+#TODO tilewise?
 def estimateGreyComatrixFeatures(s, params):
     prefix = params.get("prefix", None)
     prefix = prefix+"_" if prefix else ""
@@ -20,7 +19,7 @@ def estimateGreyComatrixFeatures(s, params):
     mask_name = params.get("mask_name","img_mask_use")
 
 
-    img = s.getImgThumb(s["image_work_size"])
+    img = s.getImgThumb(s["image_work_size"])[0]
     img = color.rgb2gray(img)
 
     mask = s[mask_name] if not invert else ~s[mask_name]

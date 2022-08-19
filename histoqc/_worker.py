@@ -39,7 +39,7 @@ def worker(idx, id, server, *,
     log_manager.logger.info(f"----Working on:\t{id}\t\t{idx+1} of {num_imgs}")
 
     try:
-#        import time; start_time = time.time()
+        import time; start_time = time.time()
         s = BaseImage(command, server, id, fname_outdir, dict(config.items("BaseImage.BaseImage")))
         for process, process_params in process_queue:
             process_params["lock"] = lock
@@ -51,7 +51,7 @@ def worker(idx, id, server, *,
                 process(s, process_params)
 
             s["completed"].append(process.__name__)
-#        log_manager.logger.info("--- %s seconds ---" % (time.time() - start_time))
+        log_manager.logger.info("--- %s seconds ---" % (time.time() - start_time))
 
     except Exception as exc:
         # reproduce histoqc error string

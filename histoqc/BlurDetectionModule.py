@@ -3,6 +3,7 @@ import os
 
 import skimage
 from histoqc.BaseImage import printMaskHelper, strtobool, desync
+from histoqc.OmeroModule import uploadAsPolygons
 from skimage import io, img_as_ubyte, morphology, measure
 from skimage.color import rgb2gray
 import numpy as np
@@ -38,7 +39,10 @@ async def identifyBlurryRegions(s, params):
         tile = (int(tile[0]*scale[0]), int(tile[1]*scale[1]), int(tile[2]*scale[0]), int(tile[3]*scale[1]))
         mask = skimage.transform.resize(mask_large,(tile[3],tile[2]))
         map[tile[1]:(tile[1]+tile[3]),tile[0]:(tile[0]+tile[2])] = s["img_mask_use"][tile[1]:(tile[1]+tile[3]),tile[0]:(tile[0]+tile[2])] & (mask > 0)
-    io.imsave(s["outdir"] + os.sep + s["filename"] + "_blurry.png", img_as_ubyte(map))
+    if strtobool(params.get("upload", "False")):
+        uploadAsPolygons(s, map, "blurry")
+    else:
+        io.imsave(s["outdir"] + os.sep + s["filename"] + "_blurry.png", img_as_ubyte(map))
     s["img_mask_blurry"] = (map * 255) > 0
 
     prev_mask = s["img_mask_use"]

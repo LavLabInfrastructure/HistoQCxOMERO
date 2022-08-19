@@ -1,15 +1,14 @@
 import logging
 import os
+import asyncio
 import numpy as np
-from histoqc.BaseImage import printMaskHelper, desync
+from histoqc.BaseImage import printMaskHelper, desync, strtobool
+from histoqc.OmeroModule import uploadAsPolygons
 from skimage import io, color, img_as_ubyte
-from distutils.util import strtobool
 from skimage.filters import threshold_otsu, rank
 from skimage.morphology import disk
 from sklearn.cluster import KMeans
 from skimage import exposure
-
-import matplotlib.pyplot as plt
 
 
 
@@ -94,7 +93,10 @@ async def getIntensityThresholdPercent(s, params):
     prev_mask = s["img_mask_use"]
     s["img_mask_use"] = s["img_mask_use"] & s["img_mask_" + name]
 
-    io.imsave(s["outdir"] + os.sep + s["filename"] + "_" + name + ".png", img_as_ubyte(prev_mask & ~s["img_mask_" + name]))
+    if strtobool(params.get("upload", "False")):
+        uploadAsPolygons(s, s["img_mask_" + name], name)
+    else:
+        io.imsave(s["outdir"] + os.sep + s["filename"] + "_" + name + ".png", img_as_ubyte(prev_mask & ~s["img_mask_" + name]))
 
     s.addToPrintList(name,
                      printMaskHelper(params.get("mask_statistics", s["mask_statistics"]), prev_mask, s["img_mask_use"]))
@@ -104,7 +106,6 @@ async def getIntensityThresholdPercent(s, params):
                         f"remains detectable! Downstream modules likely to be incorrect/fail")
         s["warnings"].append(f"After LightDarkModule.getIntensityThresholdPercent:{name} NO tissue remains "
                              f"detectable! Downstream modules likely to be incorrect/fail")
-
     return
 
 

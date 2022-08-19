@@ -1,11 +1,9 @@
 import logging
 import os
-from tkinter import image_types
-from histoqc.BaseImage import printMaskHelper
+from histoqc.BaseImage import printMaskHelper, strtobool
+from histoqc.OmeroModule import uploadAsPolygons
 from skimage.morphology import remove_small_objects, binary_opening, disk
-from skimage import io, color, img_as_ubyte
-
-import matplotlib.pyplot as plt
+from skimage import io, img_as_ubyte
 
 
 def getBasicStats(s, params):
@@ -42,11 +40,14 @@ def finalProcessingSpur(s, params):
     mask_opened = binary_opening(mask, selem)
     mask_spur = ~mask_opened & mask
 
-    io.imsave(s["outdir"] + os.sep + s["filename"] + "_spur.png", img_as_ubyte(mask_spur))
+    if strtobool(params.get("upload", "False")):
+        uploadAsPolygons(s, mask_spur, "spur")
+    else:
+        io.imsave(s["outdir"] + os.sep + s["filename"] + "_spur.png", img_as_ubyte(mask_spur))
 
     prev_mask = s["img_mask_use"]
     s["img_mask_use"] = mask_opened
-
+# spur
     s.addToPrintList("spur_pixels",
                      printMaskHelper(params.get("mask_statistics", s["mask_statistics"]), prev_mask, s["img_mask_use"]))
 
@@ -65,7 +66,10 @@ def finalProcessingArea(s, params):
     mask_opened = remove_small_objects(mask, min_size=area_thresh)
     mask_removed_area = ~mask_opened & mask
 
-    io.imsave(s["outdir"] + os.sep + s["filename"] + "_areathresh.png", img_as_ubyte(mask_removed_area))
+    if strtobool(params.get("upload", "False")):
+        uploadAsPolygons(s, mask_removed_area, "area thresh")
+    else:
+        io.imsave(s["outdir"] + os.sep + s["filename"] + "_areathresh.png", img_as_ubyte(mask_removed_area))
 
     prev_mask = s["img_mask_use"]
     s["img_mask_use"] = mask_opened > 0

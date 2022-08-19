@@ -1,12 +1,7 @@
 import logging
 import os
-import sys
-
-from ast import literal_eval as make_tuple
-
-from distutils.util import strtobool
-from histoqc.BaseImage import printMaskHelper
-
+from histoqc.BaseImage import printMaskHelper, strtobool
+from histoqc.OmeroModule import uploadAsPolygons
 import scipy.signal
 
 from skimage import io, img_as_ubyte
@@ -85,8 +80,10 @@ def roiWise(s, params):
     #TODO, migrate to printMaskHelper, but currently don't see how this output affects final mask
     #s.addToPrintList(name,
     #                 printMaskHelper(params.get("mask_statistics", s["mask_statistics"]), prev_mask, s["img_mask_use"]))
-
-    io.imsave(s["outdir"] + os.sep + s["filename"] + "_BubbleBounds.png", img_as_ubyte(mask)) #.astype(np.uint8) * 255)
+    if strtobool(params.get("upload", "False")):
+        uploadAsPolygons(s, mask, name)
+    else:
+        io.imsave(s["outdir"] + os.sep + s["filename"] + "_BubbleBounds.png", img_as_ubyte(mask)) #.astype(np.uint8) * 255)
 
     return
 
@@ -110,7 +107,10 @@ def detectSmoothness(s, params):
         prev_mask = s["img_mask_use"]
         s["img_mask_flat"] = mask_flat
 
-        io.imsave(s["outdir"] + os.sep + s["filename"] + "_flat.png", img_as_ubyte(mask_flat & prev_mask))
+        if strtobool(params.get("upload", "False")):
+            uploadAsPolygons(s, mask_flat & prev_mask, "flat")
+        else:
+            io.imsave(s["outdir"] + os.sep + s["filename"] + "_flat.png", img_as_ubyte(mask_flat & prev_mask))
 
         s["img_mask_use"] = s["img_mask_use"] & ~s["img_mask_flat"]
 

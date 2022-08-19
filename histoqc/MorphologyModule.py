@@ -1,13 +1,10 @@
 import logging
 import os
 import numpy as np
-from histoqc.BaseImage import printMaskHelper
+from histoqc.BaseImage import printMaskHelper, strtobool
+from histoqc.OmeroModule import uploadAsPolygons
 from skimage import io, morphology, img_as_ubyte, measure
-
 from scipy import ndimage as ndi
-
-import matplotlib.pyplot as plt  # these 2 are used for debugging
-from histoqc.SaveModule import blend2Images #for easier debugging
 
 
 def removeSmallObjects(s, params):
@@ -16,7 +13,10 @@ def removeSmallObjects(s, params):
     img_reduced = morphology.remove_small_objects(s["img_mask_use"], min_size=min_size)
     img_small = np.invert(img_reduced) & s["img_mask_use"]
 
-    io.imsave(s["outdir"] + os.sep + s["filename"] + "_small_remove.png", img_as_ubyte(img_small))
+    if strtobool(params.get("upload", "False")):
+        uploadAsPolygons(s, img_small, "small removed")
+    else:
+        io.imsave(s["outdir"] + os.sep + s["filename"] + "_small_remove.png", img_as_ubyte(img_small))
     s["img_mask_small_filled"] = (img_small * 255) > 0
 
     prev_mask = s["img_mask_use"]
@@ -76,7 +76,10 @@ def removeFatlikeTissue(s, params):
 
     mask_fat = mask_dilate & ~mask_dilate_removed
 
-    io.imsave(s["outdir"] + os.sep + s["filename"] + "_fatlike.png", img_as_ubyte(mask_fat))
+    if strtobool(params.get("upload", "False")):
+        uploadAsPolygons(s, mask_fat, "fatlike")
+    else:
+        io.imsave(s["outdir"] + os.sep + s["filename"] + "_fatlike.png", img_as_ubyte(mask_fat))
     s["img_mask_fatlike"] = (mask_fat * 255) > 0
 
     prev_mask = s["img_mask_use"]
@@ -114,7 +117,10 @@ def fillSmallHoles(s, params):
     img_small = img_reduced & np.invert(s["img_mask_use"])
 
 
-    io.imsave(s["outdir"] + os.sep + s["filename"] + "_small_fill.png", img_as_ubyte(img_small))
+    if strtobool(params.get("upload", "False")):
+        uploadAsPolygons(s, img_small, "filled holes")
+    else:
+        io.imsave(s["outdir"] + os.sep + s["filename"] + "_small_fill.png", img_as_ubyte(img_small))
     s["img_mask_small_removed"] = (img_small * 255) > 0
 
     prev_mask = s["img_mask_use"]

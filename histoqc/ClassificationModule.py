@@ -4,10 +4,8 @@ import re
 import sys
 
 from ast import literal_eval as make_tuple
-
-from distutils.util import strtobool
-
-from histoqc.BaseImage import printMaskHelper, desync
+from histoqc.BaseImage import printMaskHelper, desync, strtobool
+from histoqc.OmeroModule import uploadAsPolygons
 from skimage import io, img_as_ubyte
 from skimage.filters import gabor_kernel, frangi, gaussian, median, laplace
 from skimage.color import rgb2gray
@@ -51,7 +49,10 @@ async def pixelWise(s, params):
 
     s.addToPrintList(name, str(map.mean()))
 
-    io.imsave(s["outdir"] + os.sep + s["filename"] + "_" + name + ".png", img_as_ubyte(map))
+    if strtobool(params.get("upload", "False")):
+        uploadAsPolygons(s, map, name)
+    else:
+        io.imsave(s["outdir"] + os.sep + s["filename"] + "_" + name + ".png", img_as_ubyte(map))
     s["img_mask_" + name] = (map * 255) > 0
     prev_mask = s["img_mask_use"]
     s["img_mask_use"] = s["img_mask_use"] & ~s["img_mask_" + name]
@@ -191,7 +192,6 @@ def byExampleWithFeatures(s, params):
 
                 model_vals.append(eximg)
                 model_labels = np.vstack((model_labels, mask))
-                del eximg, mask
 
             # do stuff here with model_vals
             model_vals = np.vstack(model_vals)
@@ -204,8 +204,6 @@ def byExampleWithFeatures(s, params):
     img = s.getImgThumb(s["image_work_size"])[0]
     shape=img.shape
     feats = compute_features(img, params)
-    del img 
-    logging.info("deleted img")
     cal = clf.predict_proba(feats.reshape(-1, feats.shape[2]))
     cal = cal.reshape(shape[0], shape[1], 2)
 
@@ -221,7 +219,10 @@ def byExampleWithFeatures(s, params):
 
     mask = s["img_mask_use"] & (mask > 0)
 
-    io.imsave(s["outdir"] + os.sep + s["filename"] + "_" + name + ".png", img_as_ubyte(mask))
+    if strtobool(params.get("upload", "False")):
+        uploadAsPolygons(s, mask, name)
+    else:
+        io.imsave(s["outdir"] + os.sep + s["filename"] + "_" + name + ".png", img_as_ubyte(mask))
     s["img_mask_" + name] = (mask * 255) > 0
     prev_mask = s["img_mask_use"]
     s["img_mask_use"] = s["img_mask_use"] & ~s["img_mask_" + name]
