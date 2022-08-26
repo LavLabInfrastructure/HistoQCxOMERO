@@ -1,5 +1,11 @@
 ﻿# Changelog
 
+
+## Version .2 
+HistoQCxOMERO branch created 
+
+### HISTOQC
+
 ## Version 3.0beta
 
 HistoQC has been nicely packaged thanks to [Andreas Poehlmann](https://github.com/ap--) _(Machine Learning Research - Bayer AG)_ !

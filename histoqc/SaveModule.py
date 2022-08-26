@@ -3,7 +3,7 @@ import os
 from distutils.util import strtobool
 from histoqc.OmeroModule import uploadAsPolygons
 import numpy as np
-from skimage import io, color, img_as_ubyte
+from skimage import io, color, img_as_ubyte, morphology
 
 def blend2Images(img, mask): 
     if (img.ndim == 3):

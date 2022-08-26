@@ -1,4 +1,4 @@
-# HistoQC
+# HistoQCxOMERO
 ---
 
 HistoQC is an open-source quality control tool for digital pathology slides
@@ -8,16 +8,12 @@ HistoQC is an open-source quality control tool for digital pathology slides
 # Requirements
 ---
 
-Tested with Python 3.7 and 3.8
+Tested with Python 3.8
 Note: the  DockerFile installs Python 3.8, so if your goal is reproducibility you may want to take this into account
 
 Requires:
 
-1. openslide
-
-And the following additional python package: 
-
-1. python-openslide
+1. omero-py
 2. matplotlib
 3. numpy
 4. scipy
@@ -32,9 +28,7 @@ pip3 install -r requirements.txt
 
 The library versions have been pegged to the current validated ones. Later versions are likely to work but may not allow for cross-site/version reproducibility (typically a bad thing in quality control).
 
-Openslide binaries will have to be installed separately as per individual o/s instructions
-
-The most basic docker image can be created with the included (7-line) Dockerfile. 
+The most basic docker image can be created with the included Dockerfile. 
 
 # Basic Usage
 ---
@@ -43,14 +37,13 @@ Running the pipeline is now done via a python module:
 
 ```  
 C:\Research\code\HistoQC>python -m histoqc --help
-usage: __main__.py [-h] [-o OUTDIR] [-p BASEPATH] [-c CONFIG] [-f] [-b BATCH]
-                   [-n NPROCESSES] [--symlink TARGET_DIR]
-                   input_pattern [input_pattern ...]
+usage: __main__.py [-h] [-s SERVER] [-p PORT] [-u USER] [-w PASSWORD] [-o OUTDIR] [-P BASEPATH] 
+                   [-c CONFIG] [-f] [-b BATCH] [-n NPROCESSES] [--symlink TARGET_DIR]
+                   object_id [object_id ...]
 
 positional arguments:
-  input_pattern         input filename pattern (try: *.svs or
-                        target_path/*.svs ), or tsv file containing list of
-                        files to analyze
+  object_id         Project:id, Dataset:id, or id to select images by project id, dataset id, or image id respectively
+                     or tsv file containing list of ids to analyze
 
 optional arguments:
   -h, --help            show this help message and exit

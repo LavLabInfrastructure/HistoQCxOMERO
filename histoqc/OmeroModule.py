@@ -1,9 +1,7 @@
-from email.mime import base
 import logging
 from skimage import measure, transform
 from omero.model import RoiI, PolygonI
 from omero.rtypes import rint, rstring
-
 
 def rgba_to_int(red, green, blue, alpha=255):
     """ Return the color as an Integer in RGBA encoding """

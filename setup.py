@@ -18,12 +18,13 @@ data_files = [
 ]
 
 setup(
-    use_scm_version={
-        # duplicated config from pyproject.toml; keep in sync
-        "write_to": "histoqc/_version.py",
-        "version_scheme": "post-release",
-    },
-    setup_requires=['setuptools_scm'],
+    # use_scm_version={
+    #     # duplicated config from pyproject.toml; keep in sync
+    #     "write_to": "histoqc/_version.py",
+    #     "version_scheme": "post-release",
+    # },
+    # setup_requires=['setuptools_scm'],
+    version='0.20',
     package_data={
         'histoqc.config': ['*.ini'],
         'histoqc.data': data_files,

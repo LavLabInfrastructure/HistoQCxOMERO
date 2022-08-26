@@ -1,14 +1,13 @@
 import argparse
 import configparser
-from dataclasses import is_dataclass
 import datetime
 import logging
 import multiprocessing
 import os
+from posixpath import split
 import sys
 import tempfile
 from functools import partial
-from histoqc import data
 
 from omero.gateway import BlitzGateway
 from omero.sys import Parameters
@@ -26,51 +25,20 @@ from histoqc._worker import worker_success
 from histoqc._worker import worker_error
 from histoqc.config import read_config_template
 from histoqc.data import managed_pkg_data
-from omero import scripts
-from omero.rtypes import rstring, rint
 
 
 @managed_pkg_data
-def main(argv=None):
+def main(argv=None, client=None):
     """main entry point for histoqc pipelines"""
     if argv is None:
         argv = sys.argv[1:]
-        client = None
-    if argv is None:
-        try:
-            # --- server-side client interface -----------------------------------
-            dataTypes = [rstring('Image'), rstring('Dataset'), rstring('Project')]
-
-            configs="Default" #TODO
-            client = scripts.client(
-                'HistoQC', """This script runs HistoQC modules based on provided config file, served through omero api""",
-                scripts.String("Data_Type", optional=False, grouping="1", description="Choose Datatype (Image, Dataset, Project)", values=dataTypes, default="Image"),
-                scripts.List("IDs", optional=False, grouping="2",description="List of Image IDs to process.").ofType(rint(0)),
-                scripts.String("Config", optional=False, grouping="3",description="Config file to use. Config generator script coming soon", values=configs, default="Default"),
-                version="0.1",
-                authors=["Andrew Janowczyk", "Michael Barrett"],
-                institutions=["CASE", "LaViolette Lab"],
-                contact="mjbarrett@mcw.edu",
-            )
-            dataType = client.getInput("Data_Type", unwrap=True)
-            rawIds = client.getInput("Ids", unwrap=True)
-            with client.getInput("Config", unwrap=True) as configIn:
-                logging.info(configIn)
-            for id in rawIds: ids=ids+str(id)+"," # format list as csvs string
-            argv = f"{dataType}:{ids}" # format vals into terminal command
-        except Exception:
-            logging.info("OMEROxHistoQC Client")
-
+            
 
     parser = argparse.ArgumentParser(prog="histoqc", description='Run HistoQC main quality control pipeline for digital pathology images')
     parser.add_argument('object_id',
                         help="OMERO object id(s)"
                              "(You can use * for all images, or Project:00/Dataset:00 to specify image groups)",
-                        nargs="+")
-    parser.add_argument('-C', '--client',
-                        help="OMERO client object, which is just prepared login info",
-                        default="",
-                        type=str)
+                        nargs="+", type=str)
     parser.add_argument('-s', '--server', 
                         help="Skips being prompted about which omero server to sign in on",
                         default="",
@@ -122,7 +90,6 @@ def main(argv=None):
                         help="create symlink to outdir in TARGET_DIR",
                         default=None)
     args = parser.parse_args(argv)
-    if client != None: args.client=client
 
     # --- multiprocessing and logging setup -----------------------------------
 
@@ -163,8 +130,7 @@ def main(argv=None):
         args.outdir = os.path.expanduser(args.outdir)
         os.makedirs(args.outdir, exist_ok=True)
     else :
-        args.outdir = tempfile.TemporaryDirectory()
-        
+        args.outdir = tempfile.mkdtemp()
     move_logging_file_handler(logging.getLogger(), args.outdir)
 
 
@@ -188,44 +154,53 @@ def main(argv=None):
     results.add_header(f"command_line_args:\t{' '.join(argv)}")
 
     # --- log in to omero, prompt for info if needed -------------------------
-    while True :
-        while args.server == "" : args.server = input("Server:[ip/hostname]")
-        while args.port == "" : args.port = input("Port:[4064/4063]")
-        while args.user == "" : args.user = input("Username:[user]")
-        while args.password == "" : args.password = input("Password:[pass]")
-        if args.secure == None :
-            args.secure = True if args.port == "4064" else False 
-        conn = BlitzGateway(args.user, args.password, host=args.server, port=args.port, secure=args.secure)
-        if conn.connect() == True : break
-    server=(args.user, args.password, args.server, args.port, args.secure)
-    
-    # --- parse and check omero object ids (there are _ options) ------------------------
-    #### Project:1  1 2 3 4 or tsv
-    service=conn.getContainerService()
-    if len(args.object_id) > 1 :
-        # more than one is interpretted as a list of Image IDs
-        ids = list(args.object_id)
-    elif args.object_id[0].endswith('.tsv') :
-        # if it's a tsv it should be full of image ids
+    if client == None:
+        try:
+            conn = BlitzGateway(args.user, args.password, host=args.server, port=args.port, secure=args.secure)
+            conn.connect()
+        except Exception as e:
+            logging.error("Failed to connect")
+            logging.error(e)
+            exit(1)
+    else:
+        conn = BlitzGateway(client_obj=client)
+    conn.c.enableKeepAlive(60)
+
+    # --- parse and check omero object ids (there are 2 options) ------------------------
+    args.object_id=''.join(args.object_id) # list to string
+    # if tsv, grab ome objects
+    if type(args.object_id) is str and args.object_id.endswith('.tsv') :
         ids = []
         with open(args.object_id, 'rt') as f :
             for line in f :
                 if line[0] == "#": continue 
-                id = line.strip().split("\t")[0]
-                ids.append(id)
-    else :
-        # else check if it's not a number, check for an object type and fetch children
-        user_in = args.object_id[0]
-        if user_in.isdigit() : 
-            ids = list(user_in)
-        else :
-            splitted = user_in.strip().split(":")
-            api_return = service.getImages(splitted[0],[int(splitted[1])],Parameters())
-            ids = []
-            for val in api_return :
-                ids.append(val._id._val)
+                obj = line.strip().split("\t")
+                if len(obj) > 1:
+                    ids.append(f"{obj[0]}:{obj[1]} ")
+                else :
+                    ids.append(f"{obj[0]} ")
+        args.object_id = ids
+    else:
+        args.object_id = args.object_id.split(' ')
+        length=len(args.object_id)
+        if type(args.object_id) is list and length > 1: 
+            args.object_id.pop(length-1)
+
+    # parse ome objs to image ids  
+    service=conn.getContainerService()
+    ids = []
+    for objId in args.object_id: #for obj in input, find all related images
+        splitObj=objId.split(':')
+        if splitObj[0].lower() == "image": objId=splitObj[1] # image:(imgId) is unneeded
+        if objId.isdigit(): #is img id
+            ids.append(int(objId))
+        else : # else 
+            for obj in splitObj[1].split(','):
+                if obj.isdigit():
+                    api_return = service.getImages(splitObj[0],[int(obj)],Parameters())
+                    for val in api_return :
+                        ids.append(val._id._val)
     service.close()
-    conn.close()
     lm.logger.info("-" * 80)
     num_imgs = len(ids)
     lm.logger.info(f"Number of files detected by pattern:\t{num_imgs}")
@@ -256,7 +231,7 @@ def main(argv=None):
                         for idx, id in enumerate(ids):
                             _ = pool.apply_async(
                                 func=worker,
-                                args=(idx, id, server),
+                                args=(idx, id, conn),
                                 kwds=_shared_state,
                                 callback=partial(worker_success, result_file=results),
                                 error_callback=partial(worker_error, failed=failed),
@@ -269,7 +244,7 @@ def main(argv=None):
         else:
             for idx, id in enumerate(ids):
                 try:
-                    _success = worker(idx, id, server, **_shared_state)
+                    _success = worker(idx, id, conn, **_shared_state)
                 except Exception as exc:
                     worker_error(exc, failed)
                     continue

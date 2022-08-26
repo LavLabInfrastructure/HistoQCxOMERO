@@ -30,9 +30,9 @@ dependencies:
   - matplotlib
   - scikit-image
   - scikit-learn
-  - openslide-python
   - matplotlib
-
+  - omero-py
+  - dill
   - setuptools-scm
   - wheel
 

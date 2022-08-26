@@ -1,10 +1,10 @@
-omero-py==5.11.2
-scikit-image==0.18.1
-scikit-learn==0.24.1
-numpy==1.20.1
-scipy==1.6.1
-matplotlib==3.3.4
-dill==0.3.3
-pytest
-importlib-resources
+dill == 0.3.5.1
+importlib-resources == 5.9.0
+matplotlib == 3.5.3
+numpy == 1.23.2
+omero-py == 5.11.2
+pytest == 7.1.2
+scikit-image == 0.19.3
+scikit-learn == 1.1.2
+scipy == 1.9.0
 

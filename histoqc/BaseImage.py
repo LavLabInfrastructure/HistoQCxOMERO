@@ -48,7 +48,7 @@ async def desync(it):
 
 class BaseImage(dict):
 
-    def __init__(self, command, server, id, fname_outdir, params):
+    def __init__(self, command, conn, id, fname_outdir, params):
         dict.__init__(self)
 
         self.in_memory_compression = strtobool(params.get("in_memory_compression", "False"))
@@ -58,10 +58,6 @@ class BaseImage(dict):
         self["outdir"] = fname_outdir
         self["orig_command"] = command
         
-        # create main handle
-        conn = BlitzGateway(server[0],server[1],host=server[2],port=server[3],secure=server[4]) 
-        conn.connect()
-        conn.c.enableKeepAlive(30)
 
         # get omero service handles
         self["omero_conn_handle"] = conn

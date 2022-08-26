@@ -4,7 +4,6 @@ from asyncio.log import logger
 import inspect
 import os
 import shutil
-from typing import Coroutine
 
 from histoqc.BaseImage import BaseImage
 from histoqc._pipeline import load_pipeline
@@ -17,7 +16,7 @@ def worker_setup(c):
     load_pipeline(config=c)
 
 
-def worker(idx, id, server, *,
+def worker(idx, id, conn, *,
            process_queue, config, outdir, log_manager, lock, shared_dict, num_imgs, force, command):
     """pipeline worker function"""
 
@@ -40,7 +39,7 @@ def worker(idx, id, server, *,
 
     try:
         import time; start_time = time.time()
-        s = BaseImage(command, server, id, fname_outdir, dict(config.items("BaseImage.BaseImage")))
+        s = BaseImage(command, conn, id, fname_outdir, dict(config.items("BaseImage.BaseImage")))
         for process, process_params in process_queue:
             process_params["lock"] = lock
             process_params["shared_dict"] = shared_dict
@@ -76,8 +75,8 @@ def worker(idx, id, server, *,
         #   file handle. This will need fixing in BaseImage.
         #   -> best solution would be to make BaseImage a contextmanager and close
         #      and cleanup the OpenSlide handle on __exit__
-        s["omero_image_meta"] = None
-        s["omero_pixel_store"] = None  # need to get rid of handles because it can't be pickled
+        #s["omero_image_meta"] = None
+        #s["omero_pixel_store"] = None  # need to get rid of handles because it can't be pickled
         return s
 
 
