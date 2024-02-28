@@ -32,14 +32,14 @@ def main(argv=None, client=None):
     """main entry point for histoqc pipelines"""
     if argv is None:
         argv = sys.argv[1:]
-            
+
 
     parser = argparse.ArgumentParser(prog="histoqc", description='Run HistoQC main quality control pipeline for digital pathology images')
     parser.add_argument('object_id',
                         help="OMERO object id(s)"
                              "(You can use * for all images, or Project:00/Dataset:00 to specify image groups)",
                         nargs="+", type=str)
-    parser.add_argument('-s', '--server', 
+    parser.add_argument('-s', '--server',
                         help="Skips being prompted about which omero server to sign in on",
                         default="",
                         type=str)
@@ -126,7 +126,7 @@ def main(argv=None, client=None):
             return -1
 
     # --- create output directory and move log --------------------------------
-    if args.outdir : 
+    if args.outdir :
         args.outdir = os.path.expanduser(args.outdir)
         os.makedirs(args.outdir, exist_ok=True)
     else :
@@ -173,7 +173,7 @@ def main(argv=None, client=None):
         ids = []
         with open(args.object_id, 'rt') as f :
             for line in f :
-                if line[0] == "#": continue 
+                if line[0] == "#": continue
                 obj = line.strip().split("\t")
                 if len(obj) > 1:
                     ids.append(f"{obj[0]}:{obj[1]} ")
@@ -183,10 +183,10 @@ def main(argv=None, client=None):
     else:
         args.object_id = args.object_id.split(' ')
         length=len(args.object_id)
-        if type(args.object_id) is list and length > 1: 
+        if type(args.object_id) is list and length > 1:
             args.object_id.pop(length-1)
 
-    # parse ome objs to image ids  
+    # parse ome objs to image ids
     service=conn.getContainerService()
     ids = []
     for objId in args.object_id: #for obj in input, find all related images
@@ -194,7 +194,7 @@ def main(argv=None, client=None):
         if splitObj[0].lower() == "image": objId=splitObj[1] # image:(imgId) is unneeded
         if objId.isdigit(): #is img id
             ids.append(int(objId))
-        else : # else 
+        else : # else
             for obj in splitObj[1].split(','):
                 if obj.isdigit():
                     api_return = service.getImages(splitObj[0],[int(obj)],Parameters())
